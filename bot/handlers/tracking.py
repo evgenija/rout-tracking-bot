@@ -64,6 +64,7 @@ async def cmd_start_route(message: Message):
 
     now = datetime.now().isoformat()
     route_id = await start_route(user_id, now)
+    user = await get_user(user_id)
 
     await message.answer(
         f"🚀 Маршрут #{route_id} розпочато!\n"
@@ -71,6 +72,16 @@ async def cmd_start_route(message: Message):
         "Натисніть кнопку щоб надіслати геолокацію.",
         reply_markup=kb_driver_active(),
     )
+
+    # Повідомити груповий чат про старт
+    try:
+        await message.bot.send_message(
+            GROUP_CHAT_ID,
+            f"🚀 Водій {user['full_name']} розпочав маршрут #{route_id}\n"
+            f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}",
+        )
+    except Exception as e:
+        logger.warning("Не вдалося надіслати старт в груповий чат: %s", e)
 
 
 # ── /end_route ────────────────────────────────────────────────────────────────
@@ -98,14 +109,24 @@ async def cmd_end_route(message: Message):
     hours, rem = divmod(int(delta.total_seconds()), 3600)
     minutes = rem // 60
 
-    await message.answer(
+    user = await get_user(user_id)
+    summary = (
         f"🏁 Маршрут #{active['id']} завершено!\n\n"
+        f"👤 {user['full_name']}\n"
         f"📍 Точок: {len(waypoints)}\n"
         f"🛣 Відстань: {total_km:.2f} км\n"
         f"⏱ Тривалість: {hours}г {minutes}хв\n"
-        f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}",
-        reply_markup=kb_driver_idle(),
+        f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}"
     )
+
+    await message.answer(summary, reply_markup=kb_driver_idle())
+
+    # Сповістити адмінів про завершення маршруту
+    for admin_id in ADMIN_IDS:
+        try:
+            await message.bot.send_message(admin_id, summary)
+        except Exception as e:
+            logger.warning("Не вдалося надіслати фініш адміну %s: %s", admin_id, e)
 
 
 # ── Геолокація ────────────────────────────────────────────────────────────────
@@ -168,7 +189,8 @@ async def handle_waypoint_name(message: Message, state: FSMContext):
     await message.answer(
         f"{flag} {point_name}\n"
         f"📌 {lat:.5f}, {lon:.5f}\n"
-        f"⏰ {datetime.now().strftime('%H:%M')}"
+        f"⏰ {datetime.now().strftime('%H:%M')}",
+        reply_markup=kb_driver_active(),
     )
 
     # Дублювати в груповий чат
