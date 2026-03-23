@@ -3,6 +3,8 @@ from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
+from bot.utils.keyboards import kb_driver_idle
+
 from bot.config import ADMIN_IDS, SUPER_ADMIN_IDS, COMPANY_NAME, WELCOME_MESSAGE
 from bot.models.database import get_user, create_user, approve_user, delete_user
 
@@ -58,12 +60,15 @@ async def cmd_start(message: Message):
 
     # Вже авторизований
     if existing and existing["is_approved"]:
-        cmds = "/start_route — почати маршрут\n/end_route — завершити маршрут"
+        cmds = ""
         if is_admin(user_id):
-            cmds += "\n/report — звіт за сьогодні\n/weekly — тижневий звіт\n/remove — видалити водія"
+            cmds = "\n\n/report — звіт за сьогодні\n/weekly — тижневий звіт\n/remove [id] — видалити водія"
         if is_super_admin(user_id):
             cmds += "\n/finance — фінансова модель"
-        await message.answer(f"👋 З поверненням, {full_name}!\n\n{cmds}")
+        await message.answer(
+            f"👋 З поверненням, {full_name}!{cmds}",
+            reply_markup=kb_driver_idle(),
+        )
         return
 
     if not existing:
@@ -78,7 +83,8 @@ async def cmd_start(message: Message):
             f"👋 {full_name}, ви авторизовані як адмін.\n\n"
             "/report — звіт за сьогодні\n"
             "/weekly — тижневий звіт\n"
-            "/remove [telegram_id] — видалити водія"
+            "/remove [id] — видалити водія",
+            reply_markup=kb_driver_idle(),
         )
         return
 
@@ -114,8 +120,8 @@ async def cb_approve(callback: CallbackQuery):
     try:
         await callback.bot.send_message(
             driver_id,
-            f"✅ Доступ підтверджено! Ви авторизовані в {COMPANY_NAME}.\n\n"
-            "/start_route — почати маршрут\n/end_route — завершити маршрут",
+            f"✅ Доступ підтверджено! Ви авторизовані в {COMPANY_NAME}.",
+            reply_markup=kb_driver_idle(),
         )
     except Exception as e:
         logger.warning("Не вдалося сповістити водія %s: %s", driver_id, e)

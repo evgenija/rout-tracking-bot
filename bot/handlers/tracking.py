@@ -7,6 +7,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 
+from bot.utils.keyboards import kb_driver_idle, kb_driver_active
+
 from bot.config import ADMIN_IDS, GROUP_CHAT_ID, MAX_DISTANCE_KM, MIN_TIME_MINUTES
 from bot.models.database import (
     add_waypoint,
@@ -35,6 +37,17 @@ async def _approved(user_id: int) -> bool:
     return bool(user and user["is_approved"])
 
 
+# ── Кнопки Reply Keyboard (дублюють команди) ─────────────────────────────────
+
+@router.message(F.text == "🚀 Почати маршрут")
+async def btn_start_route(message: Message):
+    await cmd_start_route(message)
+
+@router.message(F.text == "🏁 Завершити маршрут")
+async def btn_end_route(message: Message):
+    await cmd_end_route(message)
+
+
 # ── /start_route ──────────────────────────────────────────────────────────────
 
 @router.message(Command("start_route"))
@@ -55,7 +68,8 @@ async def cmd_start_route(message: Message):
     await message.answer(
         f"🚀 Маршрут #{route_id} розпочато!\n"
         f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}\n\n"
-        "Надсилайте геолокацію для фіксації точок."
+        "Натисніть кнопку щоб надіслати геолокацію.",
+        reply_markup=kb_driver_active(),
     )
 
 
@@ -89,7 +103,8 @@ async def cmd_end_route(message: Message):
         f"📍 Точок: {len(waypoints)}\n"
         f"🛣 Відстань: {total_km:.2f} км\n"
         f"⏱ Тривалість: {hours}г {minutes}хв\n"
-        f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}"
+        f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}",
+        reply_markup=kb_driver_idle(),
     )
 
 
