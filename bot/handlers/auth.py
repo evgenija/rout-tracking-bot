@@ -74,7 +74,7 @@ async def cmd_start(message: Message):
             f"👋 {full_name}, ви авторизовані як адмін.\n\n"
             "/report — звіт за сьогодні\n"
             "/weekly — тижневий звіт\n"
-            "/remove <id> — видалити водія"
+            "/remove [telegram_id] — видалити водія"
         )
         return
 
@@ -144,7 +144,7 @@ async def cmd_remove(message: Message):
 
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
-        await message.answer("Використання: /remove <telegram_id>")
+        await message.answer("Використання: /remove [telegram_id]")
         return
 
     try:
