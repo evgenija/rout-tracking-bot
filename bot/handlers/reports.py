@@ -1,0 +1,64 @@
+from datetime import datetime, timedelta
+
+from aiogram import Router
+from aiogram.filters import Command
+from aiogram.types import Message
+
+from bot.config import ADMIN_IDS, SUPER_ADMIN_IDS
+from bot.models.database import get_daily_stats, get_weekly_stats
+from bot.utils.geo import format_duration
+
+router = Router()
+
+
+def is_admin(user_id: int) -> bool:
+    return user_id in ADMIN_IDS or user_id in SUPER_ADMIN_IDS
+
+
+@router.message(Command("report"))
+async def cmd_report(message: Message):
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Недостатньо прав.")
+        return
+
+    today = datetime.now().date().isoformat()
+    stats = await get_daily_stats(today)
+
+    if not stats:
+        await message.answer(f"📊 Щоденний звіт за {today}\n\nНемає активних маршрутів.")
+        return
+
+    lines = [f"📊 Щоденний звіт за {today}\n"]
+    for s in stats:
+        duration = format_duration(s["first_start"], s["last_end"])
+        lines.append(
+            f"👤 {s['full_name']}\n"
+            f"   🛣 {s['total_km']:.1f} км\n"
+            f"   ⏱ {duration}"
+        )
+    await message.answer("\n\n".join(lines))
+
+
+@router.message(Command("weekly"))
+async def cmd_weekly(message: Message):
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Недостатньо прав.")
+        return
+
+    today = datetime.now().date()
+    week_start = (today - timedelta(days=today.weekday() + 1)).isoformat()
+    week_end = today.isoformat()
+    stats = await get_weekly_stats(week_start, week_end)
+
+    if not stats:
+        await message.answer(f"📊 Тижневий звіт ({week_start} — {week_end})\n\nНемає даних.")
+        return
+
+    lines = [f"📊 Тижневий звіт ({week_start} — {week_end})\n"]
+    grand_total = 0.0
+    for s in stats:
+        km = s["total_km"] or 0.0
+        lines.append(f"👤 {s['full_name']}: {km:.1f} км ({s['route_count']} маршрутів)")
+        grand_total += km
+    lines.append(f"\n🏁 Grand Total: {grand_total:.1f} км")
+    await message.answer("\n".join(lines))
