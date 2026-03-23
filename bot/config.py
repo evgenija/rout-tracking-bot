@@ -21,9 +21,8 @@ GROUP_CHAT_ID: int = int(os.getenv("GROUP_CHAT_ID", "0"))
 DATABASE_URL: str = os.getenv("DATABASE_URL", "bot.db")
 
 # Вираховуємо шлях до SQLite-файлу
-# Якщо є DATA_DIR (Railway persistent volume) — зберігаємо туди
 _data_dir = os.getenv("DATA_DIR", "")
-if _data_dir:
+if _data_dir and os.path.isdir(_data_dir):
     DB_PATH = os.path.join(_data_dir, "bot.db")
 elif DATABASE_URL.startswith("sqlite"):
     DB_PATH = DATABASE_URL.replace("sqlite+aiosqlite:///", "").replace("sqlite:///", "")
