@@ -121,12 +121,17 @@ async def cmd_end_route(message: Message):
 
     await message.answer(summary, reply_markup=kb_driver_idle())
 
-    # Сповістити адмінів про завершення маршруту
+    # Надіслати звіт адмінам і в груповий чат
     for admin_id in ADMIN_IDS:
         try:
             await message.bot.send_message(admin_id, summary)
         except Exception as e:
             logger.warning("Не вдалося надіслати фініш адміну %s: %s", admin_id, e)
+
+    try:
+        await message.bot.send_message(GROUP_CHAT_ID, summary)
+    except Exception as e:
+        logger.warning("Не вдалося надіслати фініш в груповий чат: %s", e)
 
 
 # ── Геолокація ────────────────────────────────────────────────────────────────
@@ -193,18 +198,17 @@ async def handle_waypoint_name(message: Message, state: FSMContext):
         reply_markup=kb_driver_active(),
     )
 
-    # Дублювати в груповий чат
-    group_text = (
-        f"{flag} Водій: {user['full_name']}\n"
-        f"📍 {point_name}\n"
-        f"📌 {lat:.5f}, {lon:.5f}\n"
+    # Дублювати в груповий чат — карта + підпис
+    caption = (
+        f"{flag} {user['full_name']} — {point_name}\n"
         f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}"
     )
     if suspicious:
-        group_text += "\n\n⚠️ ПІДОЗРІЛА ГЕОМІТКА — можливий GPS-спуфінг!"
+        caption += "\n⚠️ ПІДОЗРІЛА ГЕОМІТКА — можливий GPS-спуфінг!"
 
     try:
-        await message.bot.send_message(GROUP_CHAT_ID, group_text)
+        await message.bot.send_location(GROUP_CHAT_ID, latitude=lat, longitude=lon)
+        await message.bot.send_message(GROUP_CHAT_ID, caption)
     except Exception as e:
         logger.warning("Не вдалося надіслати в груповий чат %s: %s", GROUP_CHAT_ID, e)
 
