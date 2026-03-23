@@ -5,7 +5,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from bot.config import ADMIN_IDS, SUPER_ADMIN_IDS
-from bot.models.database import get_daily_stats, get_weekly_stats
+from bot.models.database import get_daily_stats, get_weekly_stats, get_all_users
 from bot.utils.geo import format_duration
 
 router = Router()
@@ -13,6 +13,37 @@ router = Router()
 
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS or user_id in SUPER_ADMIN_IDS
+
+
+@router.message(Command("drivers"))
+async def cmd_drivers(message: Message):
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Недостатньо прав.")
+        return
+
+    users = await get_all_users()
+    if not users:
+        await message.answer("👥 Список порожній.")
+        return
+
+    approved = [u for u in users if u["is_approved"]]
+    pending  = [u for u in users if not u["is_approved"]]
+
+    lines = ["👥 Список водіїв\n"]
+
+    if approved:
+        lines.append("✅ Авторизовані:")
+        for u in approved:
+            tag = f" @{u['username']}" if u["username"] else ""
+            lines.append(f"  • {u['full_name']}{tag} (ID: {u['telegram_id']})")
+
+    if pending:
+        lines.append("\n⏳ Очікують авторизації:")
+        for u in pending:
+            tag = f" @{u['username']}" if u["username"] else ""
+            lines.append(f"  • {u['full_name']}{tag} (ID: {u['telegram_id']})")
+
+    await message.answer("\n".join(lines))
 
 
 @router.message(Command("report"))
