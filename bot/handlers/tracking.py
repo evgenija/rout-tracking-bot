@@ -191,14 +191,13 @@ async def handle_waypoint_name(message: Message, state: FSMContext):
     user = await get_user(user_id)
     flag = "⚠️" if suspicious else "📍"
 
+    # Коротке підтвердження водію без деталей
     await message.answer(
-        f"{flag} {point_name}\n"
-        f"📌 {lat:.5f}, {lon:.5f}\n"
-        f"⏰ {datetime.now().strftime('%H:%M')}",
+        f"{flag} Точку збережено" + (" — підозріла!" if suspicious else ""),
         reply_markup=kb_driver_active(),
     )
 
-    # Дублювати в груповий чат — карта + підпис
+    # Карта + підпис з деталями — тільки в груповий чат
     caption = (
         f"{flag} {user['full_name']} — {point_name}\n"
         f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}"
