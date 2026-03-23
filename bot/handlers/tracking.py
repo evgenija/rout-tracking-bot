@@ -198,10 +198,7 @@ async def handle_waypoint_name(message: Message, state: FSMContext):
     )
 
     # Карта + підпис з деталями — тільки в груповий чат
-    caption = (
-        f"{flag} {user['full_name']} — {point_name}\n"
-        f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}"
-    )
+    caption = f"{flag} {user['full_name']} — {point_name}"
     if suspicious:
         caption += "\n⚠️ ПІДОЗРІЛА ГЕОМІТКА — можливий GPS-спуфінг!"
 
