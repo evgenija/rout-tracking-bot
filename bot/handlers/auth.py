@@ -43,6 +43,8 @@ async def cmd_start(message: Message):
     username  = message.from_user.username or ""
     full_name = message.from_user.full_name or f"User_{user_id}"
 
+    logger.info("/start від user_id=%s username=%s is_admin=%s", user_id, username, is_admin(user_id))
+
     # Визначаємо роль
     if is_super_admin(user_id):
         role = "driver,admin,super_admin"
@@ -52,6 +54,7 @@ async def cmd_start(message: Message):
         role = "driver"
 
     existing = await get_user(user_id)
+    logger.info("existing user: %s", existing)
 
     # Вже авторизований
     if existing and existing["is_approved"]:
@@ -69,6 +72,7 @@ async def cmd_start(message: Message):
     # Адміни авторизуються автоматично
     if is_admin(user_id):
         await approve_user(user_id)
+        logger.info("Sending admin welcome to user_id=%s", user_id)
         await message.answer(
             WELCOME_MESSAGE.format(company=COMPANY_NAME) + "\n\n"
             f"👋 {full_name}, ви авторизовані як адмін.\n\n"
