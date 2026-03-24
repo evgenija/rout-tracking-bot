@@ -18,6 +18,7 @@ from bot.models.database import (
     recalculate_all_route_distances,
     search_drivers_by_query,
 )
+from bot.utils.geo import format_duration
 from bot.utils.keyboards import kb_admin_main, kb_drivers_menu, kb_reports_menu
 
 logger = logging.getLogger(__name__)
@@ -76,13 +77,13 @@ async def cb_daily(callback: CallbackQuery):
 
     lines = [f"📊 Щоденний звіт за {today}\n"]
     for s in stats:
-        t_start = s["first_start"][11:16]
-        t_end   = s["last_end"][11:16]
+        duration = format_duration(s["first_start"], s["last_end"])
         lines.append(
-            f"🚛 {s['full_name']} | {s['total_km']:.1f} км | "
-            f"{s['waypoint_count']} точок | {t_start} — {t_end}"
+            f"👤 {s['full_name']}\n"
+            f"   🛣 {s['total_km']:.1f} км | {s['waypoint_count']} точок\n"
+            f"   ⏱ {duration}"
         )
-    await callback.message.answer("\n".join(lines))
+    await callback.message.answer("\n\n".join(lines))
 
 
 @router.callback_query(F.data == "rpt:weekly")
@@ -102,18 +103,13 @@ async def cb_weekly(callback: CallbackQuery):
         return
 
     lines = [f"📊 Тижневий звіт ({week_start} — {week_end})\n"]
-    grand_total_km = 0.0
-    grand_total_wp = 0
+    grand_total = 0.0
     for s in stats:
         km = s["total_km"] or 0.0
         wp = s["waypoint_count"] or 0
-        lines.append(
-            f"🚛 {s['full_name']} | {km:.1f} км | "
-            f"{wp} точок | {s['route_count']} маршрутів"
-        )
-        grand_total_km += km
-        grand_total_wp += wp
-    lines.append(f"\n🏁 Grand Total: {grand_total_km:.1f} км | {grand_total_wp} точок")
+        lines.append(f"👤 {s['full_name']}: {km:.1f} км | {wp} точок ({s['route_count']} маршрутів)")
+        grand_total += km
+    lines.append(f"\n🏁 Grand Total: {grand_total:.1f} км")
     await callback.message.answer("\n".join(lines))
 
 
