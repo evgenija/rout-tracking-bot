@@ -11,8 +11,11 @@ from bot.config import ADMIN_IDS, SUPER_ADMIN_IDS, COMPANY_NAME
 from bot.models.database import (
     delete_user,
     get_all_users,
+    get_all_routes_with_stats,
     get_daily_stats,
     get_weekly_stats,
+    flag_suspicious_waypoints_retroactive,
+    recalculate_all_route_distances,
     search_drivers_by_query,
 )
 from bot.utils.geo import format_duration
@@ -232,6 +235,40 @@ async def handle_remove_confirm(message: Message, state: FSMContext):
         await message.bot.send_message(target_id, f"❌ Вас видалено з системи {COMPANY_NAME}.")
     except Exception:
         pass
+
+
+@router.message(Command("fix_anomalies"))
+async def cmd_fix_anomalies(message: Message):
+    """Ретроактивно фіксує аномальні GPS-точки і перераховує кілометраж."""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Недостатньо прав.")
+        return
+
+    await message.answer("🔍 Сканую геомітки на аномалії...")
+
+    flag_result = await flag_suspicious_waypoints_retroactive()
+    recalc_result = await recalculate_all_route_distances()
+
+    # Повний звіт по маршрутах
+    routes = await get_all_routes_with_stats()
+    lines = [
+        f"✅ Діагностика завершена\n",
+        f"🚨 Помічено підозрілих геоміток: {flag_result['flagged']}",
+        f"🛣 Маршрутів з аномаліями: {flag_result['routes_affected']}",
+        f"🔄 Перераховано маршрутів: {recalc_result['recalculated']}",
+        f"🏁 Виправлено аномальних км: {recalc_result['anomalies_fixed']}\n",
+        "📋 Всі маршрути:",
+    ]
+    for r in routes:
+        status = "⚠️" if (r["suspicious_count"] or 0) > 0 else "✅"
+        name = r["full_name"] or f"ID:{r['driver_id']}"
+        lines.append(
+            f"{status} {name} | {r['total_km']:.1f} км | "
+            f"{r['waypoint_count']} точок ({r['suspicious_count'] or 0} підозр.) | "
+            f"{(r['start_time'] or '')[:10]}"
+        )
+
+    await message.answer("\n".join(lines))
 
 
 @router.message(Command("cancel"))

@@ -8,7 +8,11 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.config import BOT_NAME, BOT_TOKEN
 from bot.handlers import admin, auth, reports, tracking
-from bot.models.database import init_db
+from bot.models.database import (
+    init_db,
+    flag_suspicious_waypoints_retroactive,
+    recalculate_all_route_distances,
+)
 from bot.utils.scheduler import setup_scheduler
 
 logging.basicConfig(
@@ -26,6 +30,12 @@ async def main():
 
     await init_db()
     logger.info("БД ініціалізовано.")
+
+    flag_result = await flag_suspicious_waypoints_retroactive()
+    logger.info("Ретроактивна перевірка GPS: %s", flag_result)
+
+    recalc_result = await recalculate_all_route_distances()
+    logger.info("Перерахунок маршрутів: %s", recalc_result)
 
     bot = Bot(
         token=BOT_TOKEN,

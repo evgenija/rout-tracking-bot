@@ -16,12 +16,17 @@ def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def calculate_route_distance(waypoints: List[Dict]) -> float:
-    """Загальна відстань маршруту за списком геоміток."""
+    """Загальна відстань маршруту за списком геоміток.
+
+    Підозрілі точки (is_suspicious=True) виключаються з розрахунку,
+    щоб аномальні GPS-координати (РЕБ-спуфінг) не спотворювали кілометраж.
+    """
+    valid = [wp for wp in waypoints if not wp.get("is_suspicious")]
     total = 0.0
-    for i in range(1, len(waypoints)):
+    for i in range(1, len(valid)):
         total += haversine(
-            waypoints[i - 1]["lat"], waypoints[i - 1]["lon"],
-            waypoints[i]["lat"],     waypoints[i]["lon"],
+            valid[i - 1]["lat"], valid[i - 1]["lon"],
+            valid[i]["lat"],     valid[i]["lon"],
         )
     return round(total, 2)
 

@@ -212,6 +212,127 @@ async def get_daily_stats(date_str: str) -> List[Dict]:
             return [dict(r) for r in rows]
 
 
+async def flag_suspicious_waypoints_retroactive(
+    max_distance_km: float = 100.0,
+    max_speed_kmh: float = 200.0,
+) -> Dict:
+    """Ретроактивно помічає аномальні геомітки в існуючих маршрутах.
+
+    Перевіряє кожну пару сусідніх геоміток:
+    - відстань > max_distance_km → телепортація
+    - швидкість > max_speed_kmh → фізично неможливо
+
+    Повертає словник зі статистикою: {flagged: N, routes_affected: N}.
+    """
+    from bot.utils.geo import haversine
+    from datetime import datetime as _dt
+
+    flagged = 0
+    routes_affected = set()
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT id FROM routes") as cur:
+            route_ids = [r["id"] for r in await cur.fetchall()]
+
+        for route_id in route_ids:
+            async with db.execute(
+                "SELECT * FROM waypoints WHERE route_id = ? ORDER BY timestamp",
+                (route_id,),
+            ) as cur:
+                wps = [dict(r) for r in await cur.fetchall()]
+
+            for i in range(1, len(wps)):
+                prev, curr = wps[i - 1], wps[i]
+                if curr["is_suspicious"]:
+                    continue  # вже помічено
+
+                distance = haversine(prev["lat"], prev["lon"], curr["lat"], curr["lon"])
+                suspicious = False
+
+                if distance > max_distance_km:
+                    suspicious = True
+                else:
+                    try:
+                        t1 = _dt.fromisoformat(prev["timestamp"])
+                        t2 = _dt.fromisoformat(curr["timestamp"])
+                        elapsed_min = abs((t2 - t1).total_seconds() / 60)
+                        if elapsed_min >= 2.0:
+                            speed = distance / (elapsed_min / 60)
+                            if speed > max_speed_kmh:
+                                suspicious = True
+                    except Exception:
+                        pass
+
+                if suspicious:
+                    await db.execute(
+                        "UPDATE waypoints SET is_suspicious = 1 WHERE id = ?",
+                        (curr["id"],),
+                    )
+                    flagged += 1
+                    routes_affected.add(route_id)
+
+        await db.commit()
+
+    return {"flagged": flagged, "routes_affected": len(routes_affected)}
+
+
+async def recalculate_all_route_distances() -> Dict:
+    """Перераховує total_km для всіх завершених маршрутів без підозрілих точок.
+
+    Повертає словник: {recalculated: N, anomalies_fixed: N}.
+    """
+    from bot.utils.geo import calculate_route_distance
+
+    recalculated = 0
+    anomalies_fixed = 0
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT id, total_km FROM routes WHERE is_active = 0"
+        ) as cur:
+            routes = [dict(r) for r in await cur.fetchall()]
+
+        for route in routes:
+            waypoints = await get_route_waypoints(route["id"])
+            new_km = calculate_route_distance(waypoints)
+            old_km = route["total_km"] or 0.0
+
+            if abs(new_km - old_km) > 0.01:
+                await db.execute(
+                    "UPDATE routes SET total_km = ? WHERE id = ?",
+                    (new_km, route["id"]),
+                )
+                if old_km > 500:
+                    anomalies_fixed += 1
+                recalculated += 1
+
+        await db.commit()
+
+    return {"recalculated": recalculated, "anomalies_fixed": anomalies_fixed}
+
+
+async def get_all_routes_with_stats() -> List[Dict]:
+    """Повертає всі маршрути з кількістю геоміток для діагностики."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """
+            SELECT r.id, r.driver_id, u.full_name,
+                   r.total_km, r.is_active, r.start_time,
+                   COUNT(w.id) AS waypoint_count,
+                   SUM(w.is_suspicious) AS suspicious_count
+            FROM routes r
+            LEFT JOIN users u ON r.driver_id = u.telegram_id
+            LEFT JOIN waypoints w ON w.route_id = r.id
+            GROUP BY r.id
+            ORDER BY r.start_time DESC
+            """
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+
 async def get_weekly_stats(start_date: str, end_date: str) -> List[Dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
