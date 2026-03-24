@@ -29,6 +29,9 @@ elif DATABASE_URL.startswith("sqlite"):
 else:
     DB_PATH = "bot.db"
 
+# ── Google Maps Platform ──────────────────────────────────────────────────────
+GOOGLE_MAPS_API_KEY: str = os.getenv("GOOGLE_MAPS_API_KEY", "")
+
 # ── Захист від РЕБ-спуфінгу ───────────────────────────────────────────────────
 MAX_DISTANCE_KM: float = 100.0    # макс відстань між двома мітками (понад — телепортація)
 MIN_TIME_MINUTES: float = 2.0     # мін час між мітками для оцінки швидкості

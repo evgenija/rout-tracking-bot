@@ -4,9 +4,12 @@
 Запуск:
     pytest tests/test_geo.py -v
 """
+import asyncio
 import math
 import pytest
-from bot.utils.geo import haversine, calculate_route_distance, is_suspicious
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from bot.utils.geo import haversine, calculate_route_distance, is_suspicious, get_road_distance_for_route
 
 
 # ── haversine ─────────────────────────────────────────────────────────────────
@@ -134,3 +137,84 @@ def test_not_suspicious_fast_but_possible():
         max_distance_km=100.0,
         min_time_minutes=2.0,
     )
+
+
+# ── get_road_distance_for_route ───────────────────────────────────────────────
+
+_SAMPLE_WPS = [
+    {"lat": 50.4501, "lon": 30.5234},
+    {"lat": 50.3450, "lon": 30.9474},
+]
+
+
+def _make_directions_response(meters: int) -> dict:
+    return {
+        "status": "OK",
+        "routes": [{"legs": [{"distance": {"value": meters}}]}],
+    }
+
+
+def _make_mock_session(mock_resp):
+    mock_session = MagicMock()
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+    mock_session.get = MagicMock(return_value=MagicMock(
+        __aenter__=AsyncMock(return_value=mock_resp),
+        __aexit__=AsyncMock(return_value=False),
+    ))
+    return mock_session
+
+
+def test_google_api_success():
+    """Успішна відповідь API: повертає дорожню відстань у км."""
+    mock_resp = AsyncMock()
+    mock_resp.json = AsyncMock(return_value=_make_directions_response(39000))
+    mock_session = _make_mock_session(mock_resp)
+
+    with patch("bot.config.GOOGLE_MAPS_API_KEY", "fake-key"), \
+         patch("bot.utils.geo._route_distance_cache", {}), \
+         patch("aiohttp.ClientSession", return_value=mock_session):
+        result = asyncio.run(get_road_distance_for_route(_SAMPLE_WPS))
+
+    assert result == 39.0, f"Очікувалось 39.0 км, отримано {result}"
+
+
+def test_google_api_error_fallback():
+    """При помилці API — повертає haversine × 1.4 (з допуском ±0.1 км на округлення)."""
+    with patch("bot.config.GOOGLE_MAPS_API_KEY", "fake-key"), \
+         patch("bot.utils.geo._route_distance_cache", {}), \
+         patch("aiohttp.ClientSession", side_effect=Exception("timeout")):
+        result = asyncio.run(get_road_distance_for_route(_SAMPLE_WPS))
+
+    haversine_km = haversine(50.4501, 30.5234, 50.3450, 30.9474)
+    expected = haversine_km * 1.4
+    assert abs(result - expected) < 0.1, f"Очікувався fallback ~{expected:.2f} км, отримано {result}"
+
+
+def test_google_api_no_key_fallback():
+    """Без API key — повертає haversine × 1.4 без HTTP-запиту (з допуском ±0.1 км)."""
+    with patch("bot.config.GOOGLE_MAPS_API_KEY", ""), \
+         patch("bot.utils.geo._route_distance_cache", {}):
+        result = asyncio.run(get_road_distance_for_route(_SAMPLE_WPS))
+
+    haversine_km = haversine(50.4501, 30.5234, 50.3450, 30.9474)
+    expected = haversine_km * 1.4
+    assert abs(result - expected) < 0.1, f"Очікувався fallback ~{expected:.2f} км, отримано {result}"
+
+
+def test_google_api_cache_hit():
+    """Другий виклик з тими ж точками не робить HTTP-запит (cache hit)."""
+    mock_resp = AsyncMock()
+    mock_resp.json = AsyncMock(return_value=_make_directions_response(39000))
+    mock_session = _make_mock_session(mock_resp)
+
+    cache = {}
+    with patch("bot.config.GOOGLE_MAPS_API_KEY", "fake-key"), \
+         patch("bot.utils.geo._route_distance_cache", cache), \
+         patch("aiohttp.ClientSession", return_value=mock_session):
+        r1 = asyncio.run(get_road_distance_for_route(_SAMPLE_WPS))
+        r2 = asyncio.run(get_road_distance_for_route(_SAMPLE_WPS))
+
+    assert r1 == r2 == 39.0
+    # Перший виклик зробив запит, другий — взяв з кешу
+    assert mock_session.get.call_count == 1, "Очікувався 1 HTTP-запит (кеш), отримано більше"

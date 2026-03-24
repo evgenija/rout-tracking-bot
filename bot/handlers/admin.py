@@ -271,6 +271,28 @@ async def cmd_fix_anomalies(message: Message):
     await message.answer("\n".join(lines))
 
 
+@router.message(Command("recalculate_today"))
+async def cmd_recalculate_today(message: Message):
+    """Перераховує кілометраж сьогоднішніх маршрутів через Google Directions API."""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Недостатньо прав.")
+        return
+
+    today = datetime.now().date().isoformat()
+    await message.answer(f"🔄 Перераховую маршрути за {today} через Google API...")
+
+    result = await recalculate_all_route_distances(today)
+
+    from bot.utils.geo import get_api_call_count
+    lines = [
+        f"✅ Перерахунок завершено за {today}",
+        f"🔄 Оновлено маршрутів: {result['recalculated']}",
+        f"🚨 Виправлено аномальних: {result['anomalies_fixed']}",
+        f"📡 Всього API-запитів: {get_api_call_count()}",
+    ]
+    await message.answer("\n".join(lines))
+
+
 @router.message(Command("cancel"))
 async def cmd_cancel(message: Message, state: FSMContext):
     current = await state.get_state()

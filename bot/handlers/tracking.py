@@ -19,7 +19,7 @@ from bot.models.database import (
     get_user,
     start_route,
 )
-from bot.utils.geo import calculate_route_distance
+from bot.utils.geo import get_road_distance_for_route
 from bot.utils.geo import is_suspicious as check_suspicious
 
 logger = logging.getLogger(__name__)
@@ -100,7 +100,7 @@ async def cmd_end_route(message: Message):
         return
 
     waypoints = await get_route_waypoints(active["id"])
-    total_km = calculate_route_distance(waypoints)
+    total_km = await get_road_distance_for_route(waypoints)
     now = datetime.now().isoformat()
     await end_route(active["id"], now, total_km)
 

@@ -277,26 +277,34 @@ async def flag_suspicious_waypoints_retroactive(
     return {"flagged": flagged, "routes_affected": len(routes_affected)}
 
 
-async def recalculate_all_route_distances() -> Dict:
-    """Перераховує total_km для всіх завершених маршрутів без підозрілих точок.
+async def recalculate_all_route_distances(date_str: Optional[str] = None) -> Dict:
+    """Перераховує total_km для завершених маршрутів через Google Directions API.
+
+    Args:
+        date_str: Якщо задано (ISO date, напр. "2024-03-15") — тільки маршрути за цей день.
+                  Інакше — всі завершені маршрути.
 
     Повертає словник: {recalculated: N, anomalies_fixed: N}.
     """
-    from bot.utils.geo import calculate_route_distance
+    from bot.utils.geo import get_road_distance_for_route
 
     recalculated = 0
     anomalies_fixed = 0
 
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT id, total_km FROM routes WHERE is_active = 0"
-        ) as cur:
+        if date_str:
+            query = "SELECT id, total_km FROM routes WHERE is_active = 0 AND DATE(start_time) = ?"
+            params = (date_str,)
+        else:
+            query = "SELECT id, total_km FROM routes WHERE is_active = 0"
+            params = ()
+        async with db.execute(query, params) as cur:
             routes = [dict(r) for r in await cur.fetchall()]
 
         for route in routes:
             waypoints = await get_route_waypoints(route["id"])
-            new_km = calculate_route_distance(waypoints)
+            new_km = await get_road_distance_for_route(waypoints)
             old_km = route["total_km"] or 0.0
 
             if abs(new_km - old_km) > 0.01:
