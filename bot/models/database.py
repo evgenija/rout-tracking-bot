@@ -198,11 +198,13 @@ async def get_daily_stats(date_str: str) -> List[Dict]:
             """
             SELECT u.full_name,
                    u.telegram_id,
-                   COALESCE(SUM(r.total_km), 0)                          AS total_km,
-                   MIN(r.start_time)                                      AS first_start,
-                   MAX(COALESCE(r.end_time, datetime('now')))             AS last_end
+                   COALESCE(SUM(r.total_km), 0)                                    AS total_km,
+                   MIN(r.start_time)                                               AS first_start,
+                   MAX(COALESCE(r.end_time, datetime('now')))                      AS last_end,
+                   COALESCE(SUM(CASE WHEN w.is_suspicious = 0 THEN 1 ELSE 0 END), 0) AS waypoint_count
             FROM routes r
             JOIN users u ON r.driver_id = u.telegram_id
+            LEFT JOIN waypoints w ON w.route_id = r.id
             WHERE DATE(r.start_time) = ?
             GROUP BY r.driver_id
             """,
@@ -348,10 +350,12 @@ async def get_weekly_stats(start_date: str, end_date: str) -> List[Dict]:
             """
             SELECT u.full_name,
                    u.telegram_id,
-                   COALESCE(SUM(r.total_km), 0) AS total_km,
-                   COUNT(r.id)                  AS route_count
+                   COALESCE(SUM(r.total_km), 0)                                    AS total_km,
+                   COUNT(r.id)                                                     AS route_count,
+                   COALESCE(SUM(CASE WHEN w.is_suspicious = 0 THEN 1 ELSE 0 END), 0) AS waypoint_count
             FROM routes r
             JOIN users u ON r.driver_id = u.telegram_id
+            LEFT JOIN waypoints w ON w.route_id = r.id
             WHERE DATE(r.start_time) BETWEEN ? AND ?
             GROUP BY r.driver_id
             ORDER BY total_km DESC
