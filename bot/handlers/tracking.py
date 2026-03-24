@@ -9,7 +9,7 @@ from aiogram.types import Message
 
 from bot.utils.keyboards import kb_driver_idle, kb_driver_active
 
-from bot.config import ADMIN_IDS, GROUP_CHAT_ID, MAX_DISTANCE_KM, MIN_TIME_MINUTES
+from bot.config import ADMIN_IDS, SUPER_ADMIN_IDS, GROUP_CHAT_ID, MAX_DISTANCE_KM, MIN_TIME_MINUTES
 from bot.models.database import (
     add_waypoint,
     end_route,
@@ -33,6 +33,8 @@ class WaypointState(StatesGroup):
 # ── Auth helper ───────────────────────────────────────────────────────────────
 
 async def _approved(user_id: int) -> bool:
+    if user_id in ADMIN_IDS or user_id in SUPER_ADMIN_IDS:
+        return True
     user = await get_user(user_id)
     return bool(user and user["is_approved"])
 
