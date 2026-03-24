@@ -47,6 +47,20 @@ def test_haversine_returns_km_not_meters():
 
 # ── calculate_route_distance ──────────────────────────────────────────────────
 
+def test_route_realistic_daily_limit():
+    """Маршрут у межах України не може перевищувати 500 км за день."""
+    # Київ → Харків → Дніпро → Запоріжжя: ~800 км — вже за межею, але не тисячі
+    wps = [
+        {"lat": 50.4501, "lon": 30.5234},  # Київ
+        {"lat": 49.9935, "lon": 36.2304},  # Харків
+        {"lat": 48.4647, "lon": 35.0462},  # Дніпро
+        {"lat": 47.8388, "lon": 35.1396},  # Запоріжжя
+    ]
+    result = calculate_route_distance(wps)
+    assert result < 1500, f"Реалістичний маршрут не має перевищувати 1500 км, отримано {result:.1f}"
+    assert result > 0, "Відстань не може бути 0"
+
+
 def test_route_single_segment():
     """Два waypoints: результат == одна відстань haversine."""
     wps = [

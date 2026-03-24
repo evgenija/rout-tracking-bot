@@ -198,17 +198,24 @@ async def get_daily_stats(date_str: str) -> List[Dict]:
             """
             SELECT u.full_name,
                    u.telegram_id,
-                   COALESCE(SUM(r.total_km), 0)                                    AS total_km,
-                   MIN(r.start_time)                                               AS first_start,
-                   MAX(COALESCE(r.end_time, datetime('now')))                      AS last_end,
-                   COALESCE(SUM(CASE WHEN w.is_suspicious = 0 THEN 1 ELSE 0 END), 0) AS waypoint_count
+                   COALESCE(SUM(r.total_km), 0)        AS total_km,
+                   MIN(r.start_time)                   AS first_start,
+                   MAX(COALESCE(r.end_time, datetime('now'))) AS last_end,
+                   COALESCE(wc.wcount, 0)              AS waypoint_count
             FROM routes r
             JOIN users u ON r.driver_id = u.telegram_id
-            LEFT JOIN waypoints w ON w.route_id = r.id
+            LEFT JOIN (
+                SELECT r2.driver_id,
+                       SUM(CASE WHEN w.is_suspicious = 0 THEN 1 ELSE 0 END) AS wcount
+                FROM routes r2
+                JOIN waypoints w ON w.route_id = r2.id
+                WHERE DATE(r2.start_time) = ?
+                GROUP BY r2.driver_id
+            ) wc ON wc.driver_id = r.driver_id
             WHERE DATE(r.start_time) = ?
             GROUP BY r.driver_id
             """,
-            (date_str,),
+            (date_str, date_str),
         ) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
@@ -350,17 +357,24 @@ async def get_weekly_stats(start_date: str, end_date: str) -> List[Dict]:
             """
             SELECT u.full_name,
                    u.telegram_id,
-                   COALESCE(SUM(r.total_km), 0)                                    AS total_km,
-                   COUNT(r.id)                                                     AS route_count,
-                   COALESCE(SUM(CASE WHEN w.is_suspicious = 0 THEN 1 ELSE 0 END), 0) AS waypoint_count
+                   COALESCE(SUM(r.total_km), 0)  AS total_km,
+                   COUNT(r.id)                   AS route_count,
+                   COALESCE(wc.wcount, 0)        AS waypoint_count
             FROM routes r
             JOIN users u ON r.driver_id = u.telegram_id
-            LEFT JOIN waypoints w ON w.route_id = r.id
+            LEFT JOIN (
+                SELECT r2.driver_id,
+                       SUM(CASE WHEN w.is_suspicious = 0 THEN 1 ELSE 0 END) AS wcount
+                FROM routes r2
+                JOIN waypoints w ON w.route_id = r2.id
+                WHERE DATE(r2.start_time) BETWEEN ? AND ?
+                GROUP BY r2.driver_id
+            ) wc ON wc.driver_id = r.driver_id
             WHERE DATE(r.start_time) BETWEEN ? AND ?
             GROUP BY r.driver_id
             ORDER BY total_km DESC
             """,
-            (start_date, end_date),
+            (start_date, end_date, start_date, end_date),
         ) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]

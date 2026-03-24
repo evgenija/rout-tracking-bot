@@ -142,6 +142,11 @@ async def get_road_distance_for_route(waypoints: List[Dict]) -> float:
                 for leg in data["routes"][0]["legs"]
             )
             total_km = round(total_meters / 1000, 2)
+            if total_km > 1000:
+                logger.warning(
+                    "Google Directions API: підозріло великий результат %.2f км (%d точок) — перевір дані",
+                    total_km, len(valid),
+                )
             _route_distance_cache[cache_key] = total_km
             logger.info(
                 "Google Directions API запит #%d: %d точок → %.2f км (дорогами)",
