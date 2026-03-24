@@ -87,6 +87,30 @@ async def get_all_users() -> List[Dict]:
             return [dict(r) for r in rows]
 
 
+async def search_drivers_by_query(query: str) -> List[Dict]:
+    """Пошук авторизованих водіїв за точним ID або частиною імені."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        # Спробувати як числовий ID
+        try:
+            user_id = int(query)
+            async with db.execute(
+                "SELECT * FROM users WHERE telegram_id = ? AND is_approved = 1", (user_id,)
+            ) as cur:
+                rows = await cur.fetchall()
+                if rows:
+                    return [dict(r) for r in rows]
+        except ValueError:
+            pass
+        # Пошук за частиною імені (без урахування регістру)
+        async with db.execute(
+            "SELECT * FROM users WHERE is_approved = 1 AND LOWER(full_name) LIKE LOWER(?)",
+            (f"%{query}%",),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
 async def get_all_approved_drivers() -> List[Dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row

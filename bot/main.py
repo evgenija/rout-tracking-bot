@@ -7,7 +7,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.config import BOT_NAME, BOT_TOKEN
-from bot.handlers import auth, reports, tracking
+from bot.handlers import admin, auth, reports, tracking
 from bot.models.database import init_db
 from bot.utils.scheduler import setup_scheduler
 
@@ -34,6 +34,7 @@ async def main():
     dp = Dispatcher(storage=MemoryStorage())
 
     dp.include_router(auth.router)
+    dp.include_router(admin.router)
     dp.include_router(tracking.router)
     dp.include_router(reports.router)
 

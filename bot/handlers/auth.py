@@ -3,8 +3,7 @@ from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
-from bot.utils.keyboards import kb_driver_idle
-
+from bot.utils.keyboards import kb_driver_idle, kb_admin_main
 from bot.config import ADMIN_IDS, SUPER_ADMIN_IDS, COMPANY_NAME, WELCOME_MESSAGE
 from bot.models.database import get_user, create_user, approve_user, delete_user
 
@@ -49,9 +48,9 @@ async def cmd_start(message: Message):
 
     # Визначаємо роль
     if is_super_admin(user_id):
-        role = "driver,admin,super_admin"
+        role = "admin,super_admin"
     elif is_admin(user_id):
-        role = "driver,admin"
+        role = "admin"
     else:
         role = "driver"
 
@@ -60,15 +59,18 @@ async def cmd_start(message: Message):
 
     # Вже авторизований
     if existing and existing["is_approved"]:
-        cmds = ""
         if is_admin(user_id):
-            cmds = "\n\n/report — звіт за сьогодні\n/weekly — тижневий звіт\n/remove [id] — видалити водія"
-        if is_super_admin(user_id):
-            cmds += "\n/finance — фінансова модель"
-        await message.answer(
-            f"👋 З поверненням, {full_name}!{cmds}",
-            reply_markup=kb_driver_idle(),
-        )
+            await message.answer(
+                f"👋 З поверненням, {full_name}!",
+                reply_markup=kb_admin_main(),
+            )
+        else:
+            await message.answer(
+                f"👋 З поверненням, {full_name}!\n\n"
+                "/start_route — почати маршрут\n"
+                "/end_route — завершити маршрут",
+                reply_markup=kb_driver_idle(),
+            )
         return
 
     if not existing:
@@ -80,11 +82,8 @@ async def cmd_start(message: Message):
         logger.info("Sending admin welcome to user_id=%s", user_id)
         await message.answer(
             WELCOME_MESSAGE.format(company=COMPANY_NAME) + "\n\n"
-            f"👋 {full_name}, ви авторизовані як адмін.\n\n"
-            "/report — звіт за сьогодні\n"
-            "/weekly — тижневий звіт\n"
-            "/remove [id] — видалити водія",
-            reply_markup=kb_driver_idle(),
+            f"👋 {full_name}, ви авторизовані як адмін.",
+            reply_markup=kb_admin_main(),
         )
         return
 

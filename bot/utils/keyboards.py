@@ -1,9 +1,13 @@
 from aiogram.types import (
-    ReplyKeyboardMarkup,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
     KeyboardButton,
+    ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
 )
 
+
+# ── Driver keyboards ──────────────────────────────────────────────────────────
 
 def kb_driver_idle() -> ReplyKeyboardMarkup:
     """Клавіатура водія без активного маршруту."""
@@ -22,6 +26,36 @@ def kb_driver_active() -> ReplyKeyboardMarkup:
         ],
         resize_keyboard=True,
     )
+
+
+# ── Admin keyboards ───────────────────────────────────────────────────────────
+
+def kb_admin_main() -> ReplyKeyboardMarkup:
+    """Головне меню адміна."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📊 Звіти"), KeyboardButton(text="🚗 Водії")],
+            [KeyboardButton(text="💰 Фін модель")],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def kb_reports_menu() -> InlineKeyboardMarkup:
+    """Підменю звітів."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📅 Денний звіт",   callback_data="rpt:daily")],
+        [InlineKeyboardButton(text="📆 Тижневий звіт", callback_data="rpt:weekly")],
+    ])
+
+
+def kb_drivers_menu() -> InlineKeyboardMarkup:
+    """Підменю водіїв."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Список водіїв",          callback_data="drv:list")],
+        [InlineKeyboardButton(text="⏳ Запити на авторизацію",  callback_data="drv:pending")],
+        [InlineKeyboardButton(text="❌ Видалити водія",          callback_data="drv:remove")],
+    ])
 
 
 def kb_remove() -> ReplyKeyboardRemove:
