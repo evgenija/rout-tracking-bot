@@ -15,6 +15,7 @@ from bot.models.database import (
     end_route,
     get_active_route,
     get_last_waypoint,
+    get_last_valid_waypoint,
     get_route_waypoints,
     get_user,
     start_route,
@@ -198,8 +199,10 @@ async def handle_waypoint_name(message: Message, state: FSMContext):
 
     now = datetime.now().isoformat()
 
-    # РЕБ-спуфінг перевірка
-    last_wp = await get_last_waypoint(active["id"])
+    # РЕБ-спуфінг перевірка — порівнюємо з останньою валідною точкою
+    last_wp = await get_last_valid_waypoint(active["id"])
+    if last_wp is None:
+        last_wp = await get_last_waypoint(active["id"])  # fallback: всі попередні підозрілі
     suspicious = False
     if last_wp:
         suspicious = check_suspicious(

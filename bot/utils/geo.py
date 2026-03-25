@@ -189,21 +189,17 @@ def is_suspicious(
     """
     distance = haversine(lat1, lon1, lat2, lon2)
 
-    # Критерій 1: миттєва телепортація
-    if distance > max_distance_km:
-        return True
-
     t1 = datetime.fromisoformat(time1)
     t2 = datetime.fromisoformat(time2)
     elapsed_minutes = abs((t2 - t1).total_seconds() / 60)
 
-    # Замало часу між мітками — не оцінюємо швидкість
+    # Замало часу — тільки перевірка відстані (телепортація)
     if elapsed_minutes < min_time_minutes:
-        return False
+        return distance > max_distance_km
 
-    # Критерій 2: швидкість > 200 км/год — фізично неможлива для вантажівки
+    # Достатньо часу — тільки перевірка швидкості
     speed_kmh = distance / (elapsed_minutes / 60)
-    return speed_kmh > 200.0
+    return speed_kmh > 160.0
 
 
 # ── Utilities ─────────────────────────────────────────────────────────────────

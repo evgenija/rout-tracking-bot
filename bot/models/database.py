@@ -227,6 +227,18 @@ async def get_last_waypoint(route_id: int) -> Optional[Dict]:
             return dict(row) if row else None
 
 
+async def get_last_valid_waypoint(route_id: int) -> Optional[Dict]:
+    """Остання незапідозрена точка маршруту (is_suspicious=0)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM waypoints WHERE route_id = ? AND is_suspicious = 0 ORDER BY timestamp DESC LIMIT 1",
+            (route_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
 # ── Reports ───────────────────────────────────────────────────────────────────
 
 async def get_daily_stats(date_str: str) -> List[Dict]:
