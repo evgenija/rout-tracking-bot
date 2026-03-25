@@ -121,10 +121,13 @@ async def cb_weekly(callback: CallbackQuery):
     for s in stats:
         km = s["total_km"] or 0.0
         wp = s["waypoint_count"] or 0
-        lines.append(f"👤 {s['full_name']}: {km:.1f} км | {wp} точок ({s['route_count']} маршрутів)")
+        lines.append(
+            f"👤 {s['full_name']}\n"
+            f"   🛣 {km:.1f} км | {wp} точок"
+        )
         grand_total += km
     lines.append(f"\n🏁 Grand Total: {grand_total:.1f} км")
-    await callback.message.answer("\n".join(lines))
+    await callback.message.answer("\n\n".join(lines))
 
 
 # ── Inline callbacks: водії ───────────────────────────────────────────────────

@@ -90,7 +90,10 @@ async def cmd_weekly(message: Message):
     for s in stats:
         km = s["total_km"] or 0.0
         wp = s["waypoint_count"] or 0
-        lines.append(f"👤 {s['full_name']}: {km:.1f} км | {wp} точок ({s['route_count']} маршрутів)")
+        lines.append(
+            f"👤 {s['full_name']}\n"
+            f"   🛣 {km:.1f} км | {wp} точок"
+        )
         grand_total += km
     lines.append(f"\n🏁 Grand Total: {grand_total:.1f} км")
-    await message.answer("\n".join(lines))
+    await message.answer("\n\n".join(lines))
