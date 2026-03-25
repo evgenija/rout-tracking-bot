@@ -251,11 +251,18 @@ async def flag_suspicious_waypoints_retroactive(
             ) as cur:
                 wps = [dict(r) for r in await cur.fetchall()]
 
-            for i in range(1, len(wps)):
-                prev, curr = wps[i - 1], wps[i]
+            last_valid = None
+            for curr in wps:
                 if curr["is_suspicious"]:
-                    continue  # вже помічено
+                    # вже помічено — не оновлюємо last_valid щоб наступна
+                    # нормальна точка порівнювалась з останньою нормальною
+                    continue
 
+                if last_valid is None:
+                    last_valid = curr
+                    continue
+
+                prev = last_valid
                 distance = haversine(prev["lat"], prev["lon"], curr["lat"], curr["lon"])
                 suspicious = False
 
@@ -280,6 +287,8 @@ async def flag_suspicious_waypoints_retroactive(
                     )
                     flagged += 1
                     routes_affected.add(route_id)
+                else:
+                    last_valid = curr  # оновлюємо тільки якщо точка НЕ підозріла
 
         await db.commit()
 
@@ -314,6 +323,13 @@ async def recalculate_all_route_distances(date_str: Optional[str] = None) -> Dic
         for route in routes:
             waypoints = await get_route_waypoints(route["id"])
             new_km = await get_road_distance_for_route(waypoints)
+            if new_km > 1000:
+                from bot.utils.geo import calculate_route_distance
+                new_km = round(calculate_route_distance(waypoints) * 1.4, 2)
+                logger.warning(
+                    "Маршрут %s: аномальний km > 1000, скинуто до haversine×1.4 = %.2f км",
+                    route["id"], new_km,
+                )
             old_km = route["total_km"] or 0.0
 
             if abs(new_km - old_km) > 0.01:

@@ -104,6 +104,24 @@ async def cmd_end_route(message: Message):
 
     waypoints = await get_route_waypoints(active["id"])
     total_km = await get_road_distance_for_route(waypoints)
+    if total_km > 1000:
+        from bot.utils.geo import calculate_route_distance
+        suspicious_count = sum(1 for wp in waypoints if wp.get("is_suspicious"))
+        logger.warning(
+            "Маршрут #%s: аномальний km=%.2f (підозрілих %d/%d) — fallback haversine×1.4",
+            active["id"], total_km, suspicious_count, len(waypoints),
+        )
+        total_km = round(calculate_route_distance(waypoints) * 1.4, 2)
+        for admin_id in ADMIN_IDS:
+            try:
+                await message.bot.send_message(
+                    admin_id,
+                    f"⚠️ Маршрут #{active['id']}: аномальний кілометраж скинуто.\n"
+                    f"Збережено: {total_km:.1f} км (haversine×1.4)\n"
+                    f"Підозрілих точок: {suspicious_count}/{len(waypoints)}",
+                )
+            except Exception:
+                pass
     now = datetime.now().isoformat()
     await end_route(active["id"], now, total_km)
 
