@@ -372,7 +372,13 @@ async def cmd_set_manual_km(message: Message):
         await message.answer("❌ Невірний формат. route_id — ціле число, km — число.")
         return
 
-    await set_manual_km(route_id, km)
+    updated = await set_manual_km(route_id, km)
+    if not updated:
+        await message.answer(
+            f"❌ Маршрут #{route_id} не знайдено.\n"
+            "Перевір route_id у /fix_anomalies (маленьке число після #)."
+        )
+        return
     await message.answer(
         f"✏️ Маршрут #{route_id}: кілометраж встановлено вручну — {km:.1f} км"
     )

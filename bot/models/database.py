@@ -160,14 +160,16 @@ async def end_route(route_id: int, end_time: str, total_km: float):
         await db.commit()
 
 
-async def set_manual_km(route_id: int, km: float):
-    """Встановлює кілометраж вручну і позначає маршрут як is_manual=1."""
+async def set_manual_km(route_id: int, km: float) -> bool:
+    """Встановлює кілометраж вручну і позначає маршрут як is_manual=1.
+    Повертає True якщо маршрут знайдено і оновлено, False якщо не знайдено."""
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
+        cur = await db.execute(
             "UPDATE routes SET total_km = ?, is_manual = 1 WHERE id = ?",
             (km, route_id),
         )
         await db.commit()
+        return cur.rowcount > 0
 
 
 # ── Waypoints ─────────────────────────────────────────────────────────────────
