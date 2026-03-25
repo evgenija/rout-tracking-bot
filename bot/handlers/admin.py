@@ -19,7 +19,7 @@ from bot.models.database import (
     search_drivers_by_query,
 )
 from bot.utils.geo import format_duration
-from bot.utils.keyboards import kb_admin_main, kb_drivers_menu, kb_reports_menu
+from bot.utils.keyboards import kb_admin_main, kb_admin_driver_idle, kb_drivers_menu, kb_reports_menu
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -37,6 +37,20 @@ class RemoveDriverState(StatesGroup):
 
 
 # ── Reply keyboard: головне меню ──────────────────────────────────────────────
+
+@router.message(F.text == "🚗 Режим водія")
+async def btn_driver_mode(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    await message.answer("🚗 Режим водія. Можна починати маршрут.", reply_markup=kb_admin_driver_idle())
+
+
+@router.message(F.text == "◀️ Повернутися до адмін меню")
+async def btn_back_to_admin(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    await message.answer("Адмін меню:", reply_markup=kb_admin_main())
+
 
 @router.message(F.text == "📊 Звіти")
 async def btn_reports(message: Message):

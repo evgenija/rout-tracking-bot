@@ -36,6 +36,30 @@ def kb_admin_main() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="📊 Звіти"), KeyboardButton(text="🚗 Водії")],
             [KeyboardButton(text="💰 Фін модель")],
+            [KeyboardButton(text="🚗 Режим водія")],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def kb_admin_driver_idle() -> ReplyKeyboardMarkup:
+    """Адмін у режимі водія — без активного маршруту."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🚀 Почати маршрут")],
+            [KeyboardButton(text="◀️ Повернутися до адмін меню")],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def kb_admin_driver_active() -> ReplyKeyboardMarkup:
+    """Адмін у режимі водія — активний маршрут."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📍 Надіслати геолокацію", request_location=True)],
+            [KeyboardButton(text="🏁 Завершити маршрут")],
+            [KeyboardButton(text="◀️ Повернутися до адмін меню")],
         ],
         resize_keyboard=True,
     )

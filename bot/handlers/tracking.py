@@ -7,7 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 
-from bot.utils.keyboards import kb_driver_idle, kb_driver_active
+from bot.utils.keyboards import kb_driver_idle, kb_driver_active, kb_admin_driver_idle, kb_admin_driver_active
 
 from bot.config import ADMIN_IDS, SUPER_ADMIN_IDS, GROUP_CHAT_ID, MAX_DISTANCE_KM, MIN_TIME_MINUTES
 from bot.models.database import (
@@ -68,11 +68,12 @@ async def cmd_start_route(message: Message):
     route_id = await start_route(user_id, now)
     user = await get_user(user_id)
 
+    is_adm = user_id in ADMIN_IDS or user_id in SUPER_ADMIN_IDS
     await message.answer(
         f"🚀 Маршрут #{route_id} розпочато!\n"
         f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}\n\n"
         "Натисніть кнопку щоб надіслати геолокацію.",
-        reply_markup=kb_driver_active(),
+        reply_markup=kb_admin_driver_active() if is_adm else kb_driver_active(),
     )
 
     # Повідомити груповий чат про старт
@@ -121,7 +122,8 @@ async def cmd_end_route(message: Message):
         f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}"
     )
 
-    await message.answer(summary, reply_markup=kb_driver_idle())
+    is_adm = user_id in ADMIN_IDS or user_id in SUPER_ADMIN_IDS
+    await message.answer(summary, reply_markup=kb_admin_driver_idle() if is_adm else kb_driver_idle())
 
     # Надіслати звіт адмінам і в груповий чат
     for admin_id in ADMIN_IDS:
@@ -194,9 +196,10 @@ async def handle_waypoint_name(message: Message, state: FSMContext):
     flag = "⚠️" if suspicious else "📍"
 
     # Коротке підтвердження водію без деталей
+    is_adm = user_id in ADMIN_IDS or user_id in SUPER_ADMIN_IDS
     await message.answer(
         f"{flag} Точку збережено" + (" — підозріла!" if suspicious else ""),
-        reply_markup=kb_driver_active(),
+        reply_markup=kb_admin_driver_active() if is_adm else kb_driver_active(),
     )
 
     # Карта + підпис з деталями — тільки в груповий чат
