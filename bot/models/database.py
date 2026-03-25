@@ -39,6 +39,13 @@ async def init_db():
                 FOREIGN KEY (route_id) REFERENCES routes(id)
             )
         """)
+        # Міграція: is_manual може не існувати в старих БД
+        try:
+            await db.execute(
+                "ALTER TABLE routes ADD COLUMN is_manual INTEGER DEFAULT 0"
+            )
+        except Exception:
+            pass  # колонка вже існує
         await db.commit()
 
 
@@ -149,6 +156,16 @@ async def end_route(route_id: int, end_time: str, total_km: float):
         await db.execute(
             "UPDATE routes SET end_time = ?, total_km = ?, is_active = 0 WHERE id = ?",
             (end_time, total_km, route_id),
+        )
+        await db.commit()
+
+
+async def set_manual_km(route_id: int, km: float):
+    """Встановлює кілометраж вручну і позначає маршрут як is_manual=1."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE routes SET total_km = ?, is_manual = 1 WHERE id = ?",
+            (km, route_id),
         )
         await db.commit()
 
@@ -377,12 +394,14 @@ async def get_weekly_stats_by_day(start_date: str, end_date: str) -> List[Dict]:
                    rday.day,
                    rday.route_count,
                    rday.km,
+                   rday.has_manual,
                    COALESCE(wday.wcount, 0) AS waypoint_count
             FROM (
                 SELECT driver_id,
                        DATE(start_time) AS day,
                        COUNT(id)        AS route_count,
-                       COALESCE(SUM(total_km), 0) AS km
+                       COALESCE(SUM(total_km), 0)        AS km,
+                       MAX(COALESCE(is_manual, 0))        AS has_manual
                 FROM routes
                 WHERE DATE(start_time) BETWEEN ? AND ?
                 GROUP BY driver_id, DATE(start_time)
@@ -412,9 +431,10 @@ async def get_weekly_stats(start_date: str, end_date: str) -> List[Dict]:
             """
             SELECT u.full_name,
                    u.telegram_id,
-                   COALESCE(SUM(r.total_km), 0)  AS total_km,
-                   COUNT(r.id)                   AS route_count,
-                   COALESCE(wc.wcount, 0)        AS waypoint_count
+                   COALESCE(SUM(r.total_km), 0)      AS total_km,
+                   COUNT(r.id)                       AS route_count,
+                   COALESCE(wc.wcount, 0)            AS waypoint_count,
+                   MAX(COALESCE(r.is_manual, 0))     AS has_manual
             FROM routes r
             JOIN users u ON r.driver_id = u.telegram_id
             LEFT JOIN (

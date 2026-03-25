@@ -15,6 +15,7 @@ from bot.models.database import (
     get_daily_stats,
     get_weekly_stats,
     get_weekly_stats_by_day,
+    set_manual_km,
     flag_suspicious_waypoints_retroactive,
     recalculate_all_route_distances,
     search_drivers_by_query,
@@ -116,10 +117,13 @@ async def cb_weekly(callback: CallbackQuery):
 
     # Per-driver per-day breakdown (diagnostic + display)
     day_breakdown = await get_weekly_stats_by_day(week_start, week_end)
-    by_driver_day: dict[int, dict[str, float]] = {}
+    by_driver_day: dict[int, dict[str, dict]] = {}
     by_driver_log: dict[str, list] = {}
     for row in day_breakdown:
-        by_driver_day.setdefault(row["driver_id"], {})[row["day"]] = row["km"]
+        by_driver_day.setdefault(row["driver_id"], {})[row["day"]] = {
+            "km":         row["km"],
+            "has_manual": bool(row.get("has_manual", 0)),
+        }
         by_driver_log.setdefault(row["full_name"], []).append(row)
     for drv, days in by_driver_log.items():
         day_parts = ", ".join(
@@ -147,13 +151,17 @@ async def cb_weekly(callback: CallbackQuery):
         km          = s["total_km"] or 0.0
         wp          = s["waypoint_count"] or 0
         driver_days = by_driver_day.get(s["telegram_id"], {})
+        drv_manual  = bool(s.get("has_manual", 0))
 
         rows = [f"👤 {s['full_name']}"]
         for d in week_days:
-            day_km    = driver_days.get(d.isoformat(), 0.0)
+            day_data  = driver_days.get(d.isoformat(), {"km": 0.0, "has_manual": False})
+            day_km    = day_data["km"]
             day_label = f"{UA_DAYS[d.weekday()]} {d.strftime('%d.%m')}"
-            rows.append(f"📅 {day_label} — {day_km:.1f} км")
-        rows.append(f"🛣 Тотал: {km:.1f} км | {wp} точок")
+            manual_mark = " ✏️" if day_data["has_manual"] else ""
+            rows.append(f"📅 {day_label} — {day_km:.1f} км{manual_mark}")
+        total_mark = " ✏️" if drv_manual else ""
+        rows.append(f"🛣 Тотал: {km:.1f} км{total_mark} | {wp} точок")
         driver_blocks.append("\n".join(rows))
         grand_total_km  += km
         grand_total_pts += wp
@@ -313,8 +321,9 @@ async def cmd_fix_anomalies(message: Message):
     for r in routes:
         status = "⚠️" if (r["suspicious_count"] or 0) > 0 else "✅"
         name = r["full_name"] or f"ID:{r['driver_id']}"
+        manual_mark = " ✏️" if r.get("is_manual") else ""
         lines.append(
-            f"{status} {name} | {r['total_km']:.1f} км | "
+            f"{status} {name} | #{r['id']} | {r['total_km']:.1f} км{manual_mark} | "
             f"{r['waypoint_count']} точок ({r['suspicious_count'] or 0} підозр.) | "
             f"{(r['start_time'] or '')[:10]}"
         )
@@ -342,6 +351,31 @@ async def cmd_recalculate_today(message: Message):
         f"📡 Всього API-запитів: {get_api_call_count()}",
     ]
     await message.answer("\n".join(lines))
+
+
+@router.message(Command("set_manual_km"))
+async def cmd_set_manual_km(message: Message):
+    """Вручну встановлює кілометраж маршруту. Використання: /set_manual_km <route_id> <km>"""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Недостатньо прав.")
+        return
+
+    parts = (message.text or "").split()
+    if len(parts) != 3:
+        await message.answer("Використання: /set_manual_km <route_id> <km>\nПриклад: /set_manual_km 42 607")
+        return
+
+    try:
+        route_id = int(parts[1])
+        km       = float(parts[2])
+    except ValueError:
+        await message.answer("❌ Невірний формат. route_id — ціле число, km — число.")
+        return
+
+    await set_manual_km(route_id, km)
+    await message.answer(
+        f"✏️ Маршрут #{route_id}: кілометраж встановлено вручну — {km:.1f} км"
+    )
 
 
 @router.message(Command("cancel"))

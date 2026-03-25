@@ -87,10 +87,13 @@ async def cmd_weekly(message: Message):
 
     # Per-driver per-day breakdown (diagnostic + display)
     day_breakdown = await get_weekly_stats_by_day(week_start, week_end)
-    by_driver_day: dict[int, dict[str, float]] = {}
+    by_driver_day: dict[int, dict[str, dict]] = {}
     by_driver_log: dict[str, list] = {}
     for row in day_breakdown:
-        by_driver_day.setdefault(row["driver_id"], {})[row["day"]] = row["km"]
+        by_driver_day.setdefault(row["driver_id"], {})[row["day"]] = {
+            "km":         row["km"],
+            "has_manual": bool(row.get("has_manual", 0)),
+        }
         by_driver_log.setdefault(row["full_name"], []).append(row)
     for drv, days in by_driver_log.items():
         day_parts = ", ".join(
@@ -118,13 +121,17 @@ async def cmd_weekly(message: Message):
         km          = s["total_km"] or 0.0
         wp          = s["waypoint_count"] or 0
         driver_days = by_driver_day.get(s["telegram_id"], {})
+        drv_manual  = bool(s.get("has_manual", 0))
 
         rows = [f"👤 {s['full_name']}"]
         for d in week_days:
-            day_km    = driver_days.get(d.isoformat(), 0.0)
+            day_data  = driver_days.get(d.isoformat(), {"km": 0.0, "has_manual": False})
+            day_km    = day_data["km"]
             day_label = f"{UA_DAYS[d.weekday()]} {d.strftime('%d.%m')}"
-            rows.append(f"📅 {day_label} — {day_km:.1f} км")
-        rows.append(f"🛣 Тотал: {km:.1f} км | {wp} точок")
+            manual_mark = " ✏️" if day_data["has_manual"] else ""
+            rows.append(f"📅 {day_label} — {day_km:.1f} км{manual_mark}")
+        total_mark = " ✏️" if drv_manual else ""
+        rows.append(f"🛣 Тотал: {km:.1f} км{total_mark} | {wp} точок")
         driver_blocks.append("\n".join(rows))
         grand_total_km  += km
         grand_total_pts += wp
