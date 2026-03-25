@@ -79,38 +79,56 @@ async def cmd_weekly(message: Message):
         await message.answer("❌ Недостатньо прав.")
         return
 
-    today = datetime.now().date()
-    week_start = (today - timedelta(days=today.weekday())).isoformat()
-    week_end = today.isoformat()
-    stats = await get_weekly_stats(week_start, week_end)
+    today           = datetime.now().date()
+    week_start_date = today - timedelta(days=today.weekday())
+    week_start      = week_start_date.isoformat()
+    week_end        = today.isoformat()
+    stats           = await get_weekly_stats(week_start, week_end)
 
-    # Diagnostic: per-driver per-day breakdown
+    # Per-driver per-day breakdown (diagnostic + display)
     day_breakdown = await get_weekly_stats_by_day(week_start, week_end)
-    by_driver: dict[str, list] = {}
+    by_driver_day: dict[int, dict[str, float]] = {}
+    by_driver_log: dict[str, list] = {}
     for row in day_breakdown:
-        by_driver.setdefault(row["full_name"], []).append(row)
-    for drv, days in by_driver.items():
-        total_km  = sum(d["km"] for d in days)
-        total_pts = sum(d["waypoint_count"] for d in days)
+        by_driver_day.setdefault(row["driver_id"], {})[row["day"]] = row["km"]
+        by_driver_log.setdefault(row["full_name"], []).append(row)
+    for drv, days in by_driver_log.items():
         day_parts = ", ".join(
             f"{d['day']}={d['km']:.1f}km/{d['waypoint_count']}pts({d['route_count']}routes)"
             for d in days
         )
-        logger.info("[weekly] %s: %s | total=%.1fkm/%dpts", drv, day_parts, total_km, total_pts)
+        logger.info("[weekly] %s: %s | total=%.1fkm/%dpts",
+                    drv, day_parts,
+                    sum(d["km"] for d in days),
+                    sum(d["waypoint_count"] for d in days))
 
     if not stats:
         await message.answer(f"📊 Тижневий звіт ({week_start} — {week_end})\n\nНемає даних.")
         return
 
-    lines = [f"📊 Тижневий звіт ({week_start} — {week_end})\n"]
-    grand_total = 0.0
+    UA_DAYS   = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"]
+    week_days = [week_start_date + timedelta(days=i) for i in range(7)]
+
+    header = f"📊 Тижневий звіт ({week_start} — {week_end})"
+    driver_blocks   = []
+    grand_total_km  = 0.0
+    grand_total_pts = 0
+
     for s in stats:
-        km = s["total_km"] or 0.0
-        wp = s["waypoint_count"] or 0
-        lines.append(
-            f"👤 {s['full_name']}\n"
-            f"🛣 {km:.1f} км | {wp} точок"
-        )
-        grand_total += km
-    lines.append(f"─────────────────\n🏁 Grand Total: {grand_total:.1f} км")
-    await message.answer("\n\n".join(lines))
+        km          = s["total_km"] or 0.0
+        wp          = s["waypoint_count"] or 0
+        driver_days = by_driver_day.get(s["telegram_id"], {})
+
+        rows = [f"👤 {s['full_name']}"]
+        for d in week_days:
+            day_km    = driver_days.get(d.isoformat(), 0.0)
+            day_label = f"{UA_DAYS[d.weekday()]} {d.strftime('%d.%m')}"
+            rows.append(f"📅 {day_label} — {day_km:.1f} км")
+        rows.append(f"🛣 Тотал: {km:.1f} км | {wp} точок")
+        driver_blocks.append("\n".join(rows))
+        grand_total_km  += km
+        grand_total_pts += wp
+
+    body  = "\n\n─────────────────\n\n".join(driver_blocks)
+    grand = f"━━━━━━━━━━━━━━━━━\n📊 GRAND TOTAL: {grand_total_km:.1f} км | {grand_total_pts} точок"
+    await message.answer(f"{header}\n\n{body}\n\n{grand}")
