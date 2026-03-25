@@ -15,12 +15,14 @@ from bot.models.database import (
     get_daily_stats,
     get_weekly_stats,
     get_weekly_stats_by_day,
+    get_route_info,
+    get_route_waypoints,
     set_manual_km,
     flag_suspicious_waypoints_retroactive,
     recalculate_all_route_distances,
     search_drivers_by_query,
 )
-from bot.utils.geo import format_duration
+from bot.utils.geo import format_duration, haversine
 from bot.utils.keyboards import kb_admin_main, kb_admin_driver_idle, kb_drivers_menu, kb_reports_menu
 
 logger = logging.getLogger(__name__)
@@ -382,6 +384,121 @@ async def cmd_set_manual_km(message: Message):
     await message.answer(
         f"✏️ Маршрут #{route_id}: кілометраж встановлено вручну — {km:.1f} км"
     )
+
+
+@router.message(Command("diag_route"))
+async def cmd_diag_route(message: Message):
+    """Діагностика геоміток маршруту. Використання: /diag_route <route_id>"""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Недостатньо прав.")
+        return
+
+    parts = (message.text or "").split()
+    if len(parts) != 2:
+        await message.answer("Використання: /diag_route <route_id>")
+        return
+
+    try:
+        route_id = int(parts[1])
+    except ValueError:
+        await message.answer("❌ route_id має бути числом.")
+        return
+
+    route = await get_route_info(route_id)
+    if not route:
+        await message.answer(f"❌ Маршрут #{route_id} не знайдено.")
+        return
+
+    waypoints = await get_route_waypoints(route_id)
+    if not waypoints:
+        await message.answer(f"Маршрут #{route_id}: немає геоміток.")
+        return
+
+    lines = [
+        f"🔍 Маршрут #{route_id} | {route['full_name']}",
+        f"📅 {(route['start_time'] or '')[:10]} | total_km={route['total_km']:.1f} км",
+        f"Точок: {len(waypoints)}\n",
+    ]
+
+    last_valid = None
+    valid_km   = 0.0
+
+    for i, wp in enumerate(waypoints):
+        ts   = wp["timestamp"][:16].replace("T", " ")
+        flag = "⚠️" if wp["is_suspicious"] else "✅"
+        lines.append(f"{flag} #{wp['id']} | {ts} | {wp['lat']:.5f},{wp['lon']:.5f}")
+
+        # Порівняння з безпосередньо попередньою (live-алгоритм)
+        if i > 0:
+            prev = waypoints[i - 1]
+            dist = haversine(prev["lat"], prev["lon"], wp["lat"], wp["lon"])
+            try:
+                t1 = datetime.fromisoformat(prev["timestamp"])
+                t2 = datetime.fromisoformat(wp["timestamp"])
+                elapsed_s   = abs((t2 - t1).total_seconds())
+                elapsed_min = elapsed_s / 60
+                speed = dist / (elapsed_min / 60) if elapsed_min >= 0.1 else 0.0
+            except Exception:
+                elapsed_s = elapsed_min = speed = 0.0
+            reason = ("DIST " if dist > 200 else "") + \
+                     ("SPEED" if elapsed_min >= 2 and speed > 200 else "")
+            reason = reason.strip() or "OK"
+            lines.append(
+                f"   ↑prev#{prev['id']}: {dist:.1f}км "
+                f"{int(elapsed_s//60)}хв{int(elapsed_s%60)}с "
+                f"{speed:.0f}км/год [{reason}]"
+            )
+
+        # Порівняння з останньою валідною (retroactive-алгоритм) — тільки для підозрілих
+        if wp["is_suspicious"] and last_valid:
+            dist_lv = haversine(last_valid["lat"], last_valid["lon"], wp["lat"], wp["lon"])
+            try:
+                t1 = datetime.fromisoformat(last_valid["timestamp"])
+                t2 = datetime.fromisoformat(wp["timestamp"])
+                elapsed_s_lv   = abs((t2 - t1).total_seconds())
+                elapsed_min_lv = elapsed_s_lv / 60
+                speed_lv = dist_lv / (elapsed_min_lv / 60) if elapsed_min_lv >= 0.1 else 0.0
+            except Exception:
+                elapsed_s_lv = elapsed_min_lv = speed_lv = 0.0
+            reason_lv = ("DIST " if dist_lv > 200 else "") + \
+                        ("SPEED" if elapsed_min_lv >= 2 and speed_lv > 200 else "")
+            reason_lv = reason_lv.strip() or "OK(!)"
+            lines.append(
+                f"   ↑valid#{last_valid['id']}: {dist_lv:.1f}км "
+                f"{int(elapsed_s_lv//60)}хв{int(elapsed_s_lv%60)}с "
+                f"{speed_lv:.0f}км/год [{reason_lv}]"
+            )
+
+        if not wp["is_suspicious"]:
+            if last_valid:
+                valid_km += haversine(last_valid["lat"], last_valid["lon"], wp["lat"], wp["lon"])
+            last_valid = wp
+
+    suspicious_count = sum(1 for wp in waypoints if wp["is_suspicious"])
+    pct = suspicious_count / len(waypoints) * 100
+    lines += [
+        "",
+        f"📊 Всього: {len(waypoints)} | ⚠️ {suspicious_count} ({pct:.0f}%) | ✅ {len(waypoints) - suspicious_count}",
+        f"total_km в БД: {route['total_km']:.1f} | haversine по валідних: {valid_km:.1f}",
+    ]
+
+    # Відправка з розбиттям якщо > 4000 символів
+    text = "\n".join(lines)
+    if len(text) <= 4000:
+        await message.answer(text)
+    else:
+        chunk: list[str] = []
+        chunk_len = 0
+        for line in lines:
+            if chunk_len + len(line) + 1 > 3900:
+                await message.answer("\n".join(chunk))
+                chunk     = [line]
+                chunk_len = len(line)
+            else:
+                chunk.append(line)
+                chunk_len += len(line) + 1
+        if chunk:
+            await message.answer("\n".join(chunk))
 
 
 @router.message(Command("cancel"))

@@ -160,6 +160,25 @@ async def end_route(route_id: int, end_time: str, total_km: float):
         await db.commit()
 
 
+async def get_route_info(route_id: int) -> Optional[Dict]:
+    """Базова інформація про маршрут з ім'ям водія (для діагностики)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """
+            SELECT r.id, r.driver_id, u.full_name,
+                   r.total_km, r.is_active, r.start_time, r.end_time,
+                   COALESCE(r.is_manual, 0) AS is_manual
+            FROM routes r
+            JOIN users u ON r.driver_id = u.telegram_id
+            WHERE r.id = ?
+            """,
+            (route_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
 async def set_manual_km(route_id: int, km: float) -> bool:
     """Встановлює кілометраж вручну і позначає маршрут як is_manual=1.
     Повертає True якщо маршрут знайдено і оновлено, False якщо не знайдено."""
