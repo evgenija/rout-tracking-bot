@@ -271,22 +271,22 @@ async def get_daily_stats(date_str: str) -> List[Dict]:
             return [dict(r) for r in rows]
 
 
-async def flag_suspicious_waypoints_retroactive(
-    max_distance_km: float = 100.0,
-    max_speed_kmh: float = 200.0,
-) -> Dict:
-    """Ретроактивно помічає аномальні геомітки в існуючих маршрутах.
+async def flag_suspicious_waypoints_retroactive() -> Dict:
+    """Ретроактивно перераховує is_suspicious для всіх геоміток.
 
-    Перевіряє кожну пару сусідніх геоміток:
-    - відстань > max_distance_km → телепортація
-    - швидкість > max_speed_kmh → фізично неможливо
+    Використовує поточний алгоритм з config (cascade-free):
+    - час < MIN_TIME_MINUTES → перевірка відстані > MAX_DISTANCE_KM
+    - час >= MIN_TIME_MINUTES → тільки швидкість > 160 км/год
+    Також знімає прапор з точок що більше не є підозрілими.
 
-    Повертає словник зі статистикою: {flagged: N, routes_affected: N}.
+    Повертає: {flagged: N, cleared: N, routes_affected: N}.
     """
     from bot.utils.geo import haversine
+    from bot.config import MAX_DISTANCE_KM, MIN_TIME_MINUTES
     from datetime import datetime as _dt
 
     flagged = 0
+    cleared = 0
     routes_affected = set()
 
     async with aiosqlite.connect(DB_PATH) as db:
@@ -301,48 +301,47 @@ async def flag_suspicious_waypoints_retroactive(
             ) as cur:
                 wps = [dict(r) for r in await cur.fetchall()]
 
-            last_valid = None
-            for curr in wps:
-                if curr["is_suspicious"]:
-                    # вже помічено — не оновлюємо last_valid щоб наступна
-                    # нормальна точка порівнювалась з останньою нормальною
+            # Cascade-free: обробляємо всі точки, last_valid — серед вже оброблених
+            new_flags = []
+            for i, wp in enumerate(wps):
+                if i == 0:
+                    new_flags.append(0)
                     continue
-
-                if last_valid is None:
-                    last_valid = curr
-                    continue
-
-                prev = last_valid
-                distance = haversine(prev["lat"], prev["lon"], curr["lat"], curr["lon"])
+                last_valid = next(
+                    (wps[j] for j in range(i - 1, -1, -1) if new_flags[j] == 0),
+                    None,
+                )
+                ref = last_valid if last_valid is not None else wps[i - 1]
+                distance = haversine(ref["lat"], ref["lon"], wp["lat"], wp["lon"])
                 suspicious = False
+                try:
+                    t1 = _dt.fromisoformat(ref["timestamp"])
+                    t2 = _dt.fromisoformat(wp["timestamp"])
+                    elapsed_min = abs((t2 - t1).total_seconds() / 60)
+                    if elapsed_min < MIN_TIME_MINUTES:
+                        suspicious = distance > MAX_DISTANCE_KM
+                    else:
+                        speed = distance / (elapsed_min / 60)
+                        suspicious = speed > 160.0
+                except Exception:
+                    pass
+                new_flags.append(1 if suspicious else 0)
 
-                if distance > max_distance_km:
-                    suspicious = True
-                else:
-                    try:
-                        t1 = _dt.fromisoformat(prev["timestamp"])
-                        t2 = _dt.fromisoformat(curr["timestamp"])
-                        elapsed_min = abs((t2 - t1).total_seconds() / 60)
-                        if elapsed_min >= 2.0:
-                            speed = distance / (elapsed_min / 60)
-                            if speed > max_speed_kmh:
-                                suspicious = True
-                    except Exception:
-                        pass
-
-                if suspicious:
+            for wp, new_flag in zip(wps, new_flags):
+                if wp["is_suspicious"] != new_flag:
                     await db.execute(
-                        "UPDATE waypoints SET is_suspicious = 1 WHERE id = ?",
-                        (curr["id"],),
+                        "UPDATE waypoints SET is_suspicious = ? WHERE id = ?",
+                        (new_flag, wp["id"]),
                     )
-                    flagged += 1
+                    if new_flag == 1:
+                        flagged += 1
+                    else:
+                        cleared += 1
                     routes_affected.add(route_id)
-                else:
-                    last_valid = curr  # оновлюємо тільки якщо точка НЕ підозріла
 
         await db.commit()
 
-    return {"flagged": flagged, "routes_affected": len(routes_affected)}
+    return {"flagged": flagged, "cleared": cleared, "routes_affected": len(routes_affected)}
 
 
 async def recalculate_all_route_distances(date_str: Optional[str] = None) -> Dict:
