@@ -1,13 +1,16 @@
 from datetime import datetime, timedelta
 
+import logging
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
 from bot.config import ADMIN_IDS, SUPER_ADMIN_IDS
-from bot.models.database import get_daily_stats, get_weekly_stats, get_all_users
+from bot.models.database import get_daily_stats, get_weekly_stats, get_weekly_stats_by_day, get_all_users
 from bot.utils.geo import format_duration
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 
@@ -77,9 +80,23 @@ async def cmd_weekly(message: Message):
         return
 
     today = datetime.now().date()
-    week_start = (today - timedelta(days=today.weekday() + 1)).isoformat()
+    week_start = (today - timedelta(days=today.weekday())).isoformat()
     week_end = today.isoformat()
     stats = await get_weekly_stats(week_start, week_end)
+
+    # Diagnostic: per-driver per-day breakdown
+    day_breakdown = await get_weekly_stats_by_day(week_start, week_end)
+    by_driver: dict[str, list] = {}
+    for row in day_breakdown:
+        by_driver.setdefault(row["full_name"], []).append(row)
+    for drv, days in by_driver.items():
+        total_km  = sum(d["km"] for d in days)
+        total_pts = sum(d["waypoint_count"] for d in days)
+        day_parts = ", ".join(
+            f"{d['day']}={d['km']:.1f}km/{d['waypoint_count']}pts({d['route_count']}routes)"
+            for d in days
+        )
+        logger.info("[weekly] %s: %s | total=%.1fkm/%dpts", drv, day_parts, total_km, total_pts)
 
     if not stats:
         await message.answer(f"📊 Тижневий звіт ({week_start} — {week_end})\n\nНемає даних.")
@@ -92,8 +109,8 @@ async def cmd_weekly(message: Message):
         wp = s["waypoint_count"] or 0
         lines.append(
             f"👤 {s['full_name']}\n"
-            f"   🛣 {km:.1f} км | {wp} точок"
+            f"🛣 {km:.1f} км | {wp} точок"
         )
         grand_total += km
-    lines.append(f"\n🏁 Grand Total: {grand_total:.1f} км")
+    lines.append(f"─────────────────\n🏁 Grand Total: {grand_total:.1f} км")
     await message.answer("\n\n".join(lines))

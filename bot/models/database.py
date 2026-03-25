@@ -206,7 +206,7 @@ async def get_daily_stats(date_str: str) -> List[Dict]:
             JOIN users u ON r.driver_id = u.telegram_id
             LEFT JOIN (
                 SELECT r2.driver_id,
-                       SUM(CASE WHEN w.is_suspicious = 0 THEN 1 ELSE 0 END) AS wcount
+                       COUNT(w.id) AS wcount
                 FROM routes r2
                 JOIN waypoints w ON w.route_id = r2.id
                 WHERE DATE(r2.start_time) = ?
@@ -366,6 +366,45 @@ async def get_all_routes_with_stats() -> List[Dict]:
             return [dict(r) for r in await cur.fetchall()]
 
 
+async def get_weekly_stats_by_day(start_date: str, end_date: str) -> List[Dict]:
+    """Per-driver per-day breakdown for diagnostic logging."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """
+            SELECT u.full_name,
+                   rday.driver_id,
+                   rday.day,
+                   rday.route_count,
+                   rday.km,
+                   COALESCE(wday.wcount, 0) AS waypoint_count
+            FROM (
+                SELECT driver_id,
+                       DATE(start_time) AS day,
+                       COUNT(id)        AS route_count,
+                       COALESCE(SUM(total_km), 0) AS km
+                FROM routes
+                WHERE DATE(start_time) BETWEEN ? AND ?
+                GROUP BY driver_id, DATE(start_time)
+            ) rday
+            JOIN users u ON rday.driver_id = u.telegram_id
+            LEFT JOIN (
+                SELECT r2.driver_id,
+                       DATE(r2.start_time) AS day,
+                       COUNT(w.id)         AS wcount
+                FROM routes r2
+                JOIN waypoints w ON w.route_id = r2.id
+                WHERE DATE(r2.start_time) BETWEEN ? AND ?
+                GROUP BY r2.driver_id, DATE(r2.start_time)
+            ) wday ON wday.driver_id = rday.driver_id AND wday.day = rday.day
+            ORDER BY u.full_name, rday.day
+            """,
+            (start_date, end_date, start_date, end_date),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
 async def get_weekly_stats(start_date: str, end_date: str) -> List[Dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
@@ -380,7 +419,7 @@ async def get_weekly_stats(start_date: str, end_date: str) -> List[Dict]:
             JOIN users u ON r.driver_id = u.telegram_id
             LEFT JOIN (
                 SELECT r2.driver_id,
-                       SUM(CASE WHEN w.is_suspicious = 0 THEN 1 ELSE 0 END) AS wcount
+                       COUNT(w.id) AS wcount
                 FROM routes r2
                 JOIN waypoints w ON w.route_id = r2.id
                 WHERE DATE(r2.start_time) BETWEEN ? AND ?
