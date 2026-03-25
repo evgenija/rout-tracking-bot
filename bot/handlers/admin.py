@@ -18,6 +18,7 @@ from bot.models.database import (
     get_route_info,
     get_route_waypoints,
     set_manual_km,
+    clear_manual_km,
     fix_suspicious_for_route,
     flag_suspicious_waypoints_retroactive,
     recalculate_all_route_distances,
@@ -385,6 +386,31 @@ async def cmd_set_manual_km(message: Message):
     await message.answer(
         f"✏️ Маршрут #{route_id}: кілометраж встановлено вручну — {km:.1f} км"
     )
+
+
+@router.message(Command("clear_manual"))
+async def cmd_clear_manual(message: Message):
+    """Знімає позначку ручного вводу ✏️ для маршруту. Використання: /clear_manual <route_id>"""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Недостатньо прав.")
+        return
+
+    parts = (message.text or "").split()
+    if len(parts) != 2:
+        await message.answer("Використання: /clear_manual <route_id>\nПриклад: /clear_manual 14")
+        return
+
+    try:
+        route_id = int(parts[1])
+    except ValueError:
+        await message.answer("❌ route_id має бути числом.")
+        return
+
+    updated = await clear_manual_km(route_id)
+    if not updated:
+        await message.answer(f"❌ Маршрут #{route_id} не знайдено.")
+        return
+    await message.answer(f"✅ Маршрут #{route_id}: позначку ✏️ знято.")
 
 
 @router.message(Command("diag_route"))

@@ -191,6 +191,18 @@ async def set_manual_km(route_id: int, km: float) -> bool:
         return cur.rowcount > 0
 
 
+async def clear_manual_km(route_id: int) -> bool:
+    """Знімає позначку ручного вводу (is_manual=0) для маршруту.
+    Повертає True якщо маршрут знайдено і оновлено, False якщо не знайдено."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "UPDATE routes SET is_manual = 0 WHERE id = ?",
+            (route_id,),
+        )
+        await db.commit()
+        return cur.rowcount > 0
+
+
 # ── Waypoints ─────────────────────────────────────────────────────────────────
 
 async def add_waypoint(
