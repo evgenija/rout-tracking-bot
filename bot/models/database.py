@@ -457,6 +457,71 @@ async def get_weekly_stats_by_day(start_date: str, end_date: str) -> List[Dict]:
             return [dict(r) for r in rows]
 
 
+async def fix_suspicious_for_route(route_id: int) -> Dict:
+    """Перераховує is_suspicious для кожної точки маршруту з поточним алгоритмом.
+
+    Алгоритм cascade-free: для кожної точки шукає останню валідну (is_suspicious=0)
+    серед вже оброблених точок. Оновлює is_suspicious в БД, потім перераховує total_km.
+
+    Повертає: {fixed: N, total: N, old_km: float, new_km: float}
+    """
+    from bot.utils.geo import is_suspicious as check_suspicious, get_road_distance_for_route
+    from bot.config import MAX_DISTANCE_KM, MIN_TIME_MINUTES
+
+    waypoints = await get_route_waypoints(route_id)
+    if not waypoints:
+        return {"fixed": 0, "total": 0, "old_km": 0.0, "new_km": 0.0}
+
+    # Перераховуємо is_suspicious в пам'яті (cascade-free)
+    new_flags: list[int] = []
+    for i, wp in enumerate(waypoints):
+        if i == 0:
+            new_flags.append(0)
+            continue
+        # Останній валідний серед вже оброблених
+        last_valid = next(
+            (waypoints[j] for j in range(i - 1, -1, -1) if new_flags[j] == 0),
+            None,
+        )
+        ref = last_valid if last_valid is not None else waypoints[i - 1]
+        flag = check_suspicious(
+            ref["lat"], ref["lon"], ref["timestamp"],
+            wp["lat"], wp["lon"], wp["timestamp"],
+            MAX_DISTANCE_KM, MIN_TIME_MINUTES,
+        )
+        new_flags.append(1 if flag else 0)
+
+    # Записуємо оновлені прапори в БД
+    fixed = 0
+    async with aiosqlite.connect(DB_PATH) as db:
+        for wp, new_flag in zip(waypoints, new_flags):
+            if wp["is_suspicious"] != new_flag:
+                await db.execute(
+                    "UPDATE waypoints SET is_suspicious = ? WHERE id = ?",
+                    (new_flag, wp["id"]),
+                )
+                fixed += 1
+        await db.commit()
+
+    # Перераховуємо total_km з оновленими прапорами
+    updated_waypoints = await get_route_waypoints(route_id)
+    new_km = await get_road_distance_for_route(updated_waypoints)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT total_km FROM routes WHERE id = ?", (route_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            old_km = dict(row)["total_km"] if row else 0.0
+        await db.execute(
+            "UPDATE routes SET total_km = ? WHERE id = ?", (new_km, route_id)
+        )
+        await db.commit()
+
+    return {"fixed": fixed, "total": len(waypoints), "old_km": old_km, "new_km": new_km}
+
+
 async def get_weekly_stats(start_date: str, end_date: str) -> List[Dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row

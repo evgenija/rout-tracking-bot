@@ -18,6 +18,7 @@ from bot.models.database import (
     get_route_info,
     get_route_waypoints,
     set_manual_km,
+    fix_suspicious_for_route,
     flag_suspicious_waypoints_retroactive,
     recalculate_all_route_distances,
     search_drivers_by_query,
@@ -499,6 +500,38 @@ async def cmd_diag_route(message: Message):
                 chunk_len += len(line) + 1
         if chunk:
             await message.answer("\n".join(chunk))
+
+
+@router.message(Command("fix_route_suspicious"))
+async def cmd_fix_route_suspicious(message: Message):
+    """Перераховує is_suspicious для конкретного маршруту. Використання: /fix_route_suspicious <route_id>"""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Недостатньо прав.")
+        return
+
+    parts = (message.text or "").split()
+    if len(parts) != 2:
+        await message.answer("Використання: /fix_route_suspicious <route_id>\nПриклад: /fix_route_suspicious 14")
+        return
+
+    try:
+        route_id = int(parts[1])
+    except ValueError:
+        await message.answer("❌ route_id має бути числом.")
+        return
+
+    route = await get_route_info(route_id)
+    if not route:
+        await message.answer(f"❌ Маршрут #{route_id} не знайдено.")
+        return
+
+    await message.answer(f"⏳ Перераховую is_suspicious для маршруту #{route_id}...")
+    result = await fix_suspicious_for_route(route_id)
+    await message.answer(
+        f"✅ Маршрут #{route_id} — {route['full_name']}\n"
+        f"Оновлено прапорів: {result['fixed']}/{result['total']}\n"
+        f"total_km: {result['old_km']:.1f} → {result['new_km']:.1f} км"
+    )
 
 
 @router.message(Command("cancel"))
