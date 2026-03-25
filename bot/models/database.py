@@ -473,7 +473,7 @@ async def fix_suspicious_for_route(route_id: int) -> Dict:
         return {"fixed": 0, "total": 0, "old_km": 0.0, "new_km": 0.0}
 
     # Перераховуємо is_suspicious в пам'яті (cascade-free)
-    new_flags: list[int] = []
+    new_flags = []
     for i, wp in enumerate(waypoints):
         if i == 0:
             new_flags.append(0)
