@@ -17,7 +17,9 @@ from bot.models.database import (
     get_last_waypoint,
     get_last_valid_waypoint,
     get_route_waypoints,
+    get_todays_finished_route,
     get_user,
+    reactivate_route,
     start_route,
 )
 from bot.utils.geo import get_road_distance_for_route
@@ -65,27 +67,46 @@ async def cmd_start_route(message: Message):
         await message.answer("⚠️ Активний маршрут вже є. Завершіть його: /end_route")
         return
 
-    now = datetime.now().isoformat()
-    route_id = await start_route(user_id, now)
     user = await get_user(user_id)
-
     is_adm = user_id in ADMIN_IDS or user_id in SUPER_ADMIN_IDS
-    await message.answer(
-        f"🚀 Маршрут #{route_id} розпочато!\n"
-        f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}\n\n"
-        "Натисніть кнопку щоб надіслати геолокацію.",
-        reply_markup=kb_admin_driver_active() if is_adm else kb_driver_active(),
-    )
+    todays_route = await get_todays_finished_route(user_id)
 
-    # Повідомити груповий чат про старт
-    try:
-        await message.bot.send_message(
-            GROUP_CHAT_ID,
-            f"🚀 Водій {user['full_name']} розпочав маршрут #{route_id}\n"
-            f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}",
+    if todays_route:
+        # Продовжуємо завершений маршрут за сьогодні
+        await reactivate_route(todays_route["id"])
+        route_id = todays_route["id"]
+        await message.answer(
+            f"▶️ Маршрут #{route_id} продовжено!\n"
+            f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}\n\n"
+            "Натисніть кнопку щоб надіслати геолокацію.",
+            reply_markup=kb_admin_driver_active() if is_adm else kb_driver_active(),
         )
-    except Exception as e:
-        logger.warning("Не вдалося надіслати старт в груповий чат: %s", e)
+        try:
+            await message.bot.send_message(
+                GROUP_CHAT_ID,
+                f"▶️ Водій {user['full_name']} продовжив маршрут #{route_id}\n"
+                f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}",
+            )
+        except Exception as e:
+            logger.warning("Не вдалося надіслати продовження в груповий чат: %s", e)
+    else:
+        # Новий маршрут
+        now = datetime.now().isoformat()
+        route_id = await start_route(user_id, now)
+        await message.answer(
+            f"🚀 Маршрут #{route_id} розпочато!\n"
+            f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}\n\n"
+            "Натисніть кнопку щоб надіслати геолокацію.",
+            reply_markup=kb_admin_driver_active() if is_adm else kb_driver_active(),
+        )
+        try:
+            await message.bot.send_message(
+                GROUP_CHAT_ID,
+                f"🚀 Водій {user['full_name']} розпочав маршрут #{route_id}\n"
+                f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}",
+            )
+        except Exception as e:
+            logger.warning("Не вдалося надіслати старт в груповий чат: %s", e)
 
 
 # ── /end_route ────────────────────────────────────────────────────────────────

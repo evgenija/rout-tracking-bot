@@ -160,6 +160,30 @@ async def end_route(route_id: int, end_time: str, total_km: float):
         await db.commit()
 
 
+async def get_todays_finished_route(driver_id: int) -> Optional[Dict]:
+    """Повертає останній завершений маршрут водія за сьогодні (is_active=0)."""
+    today = datetime.now().date().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM routes WHERE driver_id = ? AND is_active = 0 AND DATE(start_time) = ?"
+            " ORDER BY id DESC LIMIT 1",
+            (driver_id, today),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def reactivate_route(route_id: int):
+    """Повертає завершений маршрут в активний стан (is_active=1, end_time=NULL, total_km=0)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE routes SET is_active = 1, end_time = NULL, total_km = 0 WHERE id = ?",
+            (route_id,),
+        )
+        await db.commit()
+
+
 async def get_route_info(route_id: int) -> Optional[Dict]:
     """Базова інформація про маршрут з ім'ям водія (для діагностики)."""
     async with aiosqlite.connect(DB_PATH) as db:
