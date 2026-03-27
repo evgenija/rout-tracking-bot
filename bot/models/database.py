@@ -174,6 +174,25 @@ async def get_todays_finished_route(driver_id: int) -> Optional[Dict]:
             return dict(row) if row else None
 
 
+async def get_all_active_routes_today() -> List[Dict]:
+    """Всі активні маршрути за сьогодні з даними водія."""
+    today = datetime.now().date().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """
+            SELECT r.id, r.driver_id, r.start_time,
+                   u.full_name, u.telegram_id
+            FROM routes r
+            JOIN users u ON r.driver_id = u.telegram_id
+            WHERE r.is_active = 1 AND DATE(r.start_time) = ?
+            """,
+            (today,),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
 async def reactivate_route(route_id: int):
     """Повертає завершений маршрут в активний стан (is_active=1, end_time=NULL, total_km=0)."""
     async with aiosqlite.connect(DB_PATH) as db:

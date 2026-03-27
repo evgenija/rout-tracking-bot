@@ -11,7 +11,13 @@ from bot.config import (
     DAILY_REPORT_MINUTE,
     WEEKLY_REPORT_WEEKDAY,
 )
-from bot.models.database import get_daily_stats, get_weekly_stats
+from bot.models.database import (
+    get_daily_stats,
+    get_weekly_stats,
+    get_all_active_routes_today,
+    get_route_waypoints,
+    end_route,
+)
 from bot.utils.geo import format_duration
 
 logger = logging.getLogger(__name__)
@@ -69,6 +75,60 @@ async def send_weekly_report(bot: Bot):
             logger.warning("Не вдалося надіслати тижневий звіт адміну %s: %s", admin_id, e)
 
 
+async def send_driver_reminder(bot: Bot):
+    active_routes = await get_all_active_routes_today()
+    for route in active_routes:
+        try:
+            await bot.send_message(
+                route["telegram_id"],
+                "⚠️ Твій маршрут досі активний!\n"
+                "Якщо ти завершив роботу — натисни Фініш.\n"
+                "Якщо не натиснеш до кінця дня — маршрут закриється автоматично.",
+            )
+        except Exception as e:
+            logger.warning("Не вдалося надіслати нагадування водію %s: %s", route["telegram_id"], e)
+
+
+async def auto_close_active_routes(bot: Bot):
+    from bot.utils.geo import get_road_distance_for_route
+    active_routes = await get_all_active_routes_today()
+    for route in active_routes:
+        route_id = route["id"]
+        try:
+            waypoints = await get_route_waypoints(route_id)
+            # finished_at = timestamp останньої геомітки, або зараз якщо точок немає
+            if waypoints:
+                finished_at = waypoints[-1]["timestamp"]
+            else:
+                finished_at = datetime.now().isoformat()
+
+            total_km = await get_road_distance_for_route(waypoints)
+            await end_route(route_id, finished_at, total_km)
+
+            # Повідомлення водію
+            try:
+                await bot.send_message(
+                    route["telegram_id"],
+                    f"🔒 Маршрут автоматично закрито о 23:59. Пробіг: {total_km:.1f} км",
+                )
+            except Exception as e:
+                logger.warning("Не вдалося надіслати авто-закриття водію %s: %s", route["telegram_id"], e)
+
+            # Повідомлення адмінам
+            for admin_id in ADMIN_IDS:
+                try:
+                    await bot.send_message(
+                        admin_id,
+                        f"⚠️ Маршрут #{route_id} ({route['full_name']}) закрито автоматично "
+                        f"(водій не натиснув Фініш). Пробіг: {total_km:.1f} км",
+                    )
+                except Exception as e:
+                    logger.warning("Не вдалося надіслати авто-закриття адміну %s: %s", admin_id, e)
+
+        except Exception as e:
+            logger.error("Помилка авто-закриття маршруту #%s: %s", route_id, e)
+
+
 def setup_scheduler(bot: Bot):
     scheduler.add_job(
         send_daily_report,
@@ -82,6 +142,20 @@ def setup_scheduler(bot: Bot):
         CronTrigger(day_of_week=WEEKLY_REPORT_WEEKDAY, hour=DAILY_REPORT_HOUR, minute=DAILY_REPORT_MINUTE),
         args=[bot],
         id="weekly_report",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        send_driver_reminder,
+        CronTrigger(hour=20, minute=30),
+        args=[bot],
+        id="driver_reminder",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        auto_close_active_routes,
+        CronTrigger(hour=23, minute=59),
+        args=[bot],
+        id="auto_close_routes",
         replace_existing=True,
     )
     scheduler.start()
