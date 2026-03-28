@@ -18,8 +18,10 @@ from bot.models.database import (
     get_last_valid_waypoint,
     get_route_waypoints,
     get_todays_finished_route,
+    get_todays_route,
     get_user,
     reactivate_route,
+    save_odometer,
     start_route,
 )
 from bot.utils.geo import get_road_distance_for_route
@@ -31,6 +33,11 @@ router = Router()
 
 class WaypointState(StatesGroup):
     waiting_for_name = State()
+    waiting_for_start_location = State()
+
+
+class OdometerState(StatesGroup):
+    waiting_for_odometer = State()
 
 
 # ── Auth helper ───────────────────────────────────────────────────────────────
@@ -45,18 +52,18 @@ async def _approved(user_id: int) -> bool:
 # ── Кнопки Reply Keyboard (дублюють команди) ─────────────────────────────────
 
 @router.message(F.text == "🚀 Почати маршрут")
-async def btn_start_route(message: Message):
-    await cmd_start_route(message)
+async def btn_start_route(message: Message, state: FSMContext):
+    await cmd_start_route(message, state)
 
 @router.message(F.text == "🏁 Завершити маршрут")
-async def btn_end_route(message: Message):
-    await cmd_end_route(message)
+async def btn_end_route(message: Message, state: FSMContext):
+    await cmd_end_route(message, state)
 
 
 # ── /start_route ──────────────────────────────────────────────────────────────
 
 @router.message(Command("start_route"))
-async def cmd_start_route(message: Message):
+async def cmd_start_route(message: Message, state: FSMContext):
     user_id = message.from_user.id
 
     if not await _approved(user_id):
@@ -75,44 +82,47 @@ async def cmd_start_route(message: Message):
         # Продовжуємо завершений маршрут за сьогодні
         await reactivate_route(todays_route["id"])
         route_id = todays_route["id"]
-        await message.answer(
-            f"▶️ Маршрут #{route_id} продовжено!\n"
-            f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}\n\n"
-            "Натисніть кнопку щоб надіслати геолокацію.",
-            reply_markup=kb_admin_driver_active() if is_adm else kb_driver_active(),
+        time_finish = (
+            datetime.fromisoformat(todays_route["end_time"]).strftime("%H:%M")
+            if todays_route.get("end_time")
+            else "невідомо"
         )
-        try:
-            await message.bot.send_message(
-                GROUP_CHAT_ID,
-                f"▶️ Водій {user['full_name']} продовжив маршрут #{route_id}\n"
-                f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}",
-            )
-        except Exception as e:
-            logger.warning("Не вдалося надіслати продовження в груповий чат: %s", e)
+        time_restart = datetime.now().strftime("%H:%M")
+        label = f"▶️ Маршрут #{route_id} продовжено!"
+        group_label = (
+            f"🔄 Маршрут {user['full_name']} поновлено після перерви\n"
+            f"⏸ Перерва з {time_finish} до {time_restart}\n"
+            f"⚠️ Геомітки за цей період не збережені"
+        )
     else:
         # Новий маршрут
         now = datetime.now().isoformat()
         route_id = await start_route(user_id, now)
-        await message.answer(
-            f"🚀 Маршрут #{route_id} розпочато!\n"
-            f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}\n\n"
-            "Натисніть кнопку щоб надіслати геолокацію.",
-            reply_markup=kb_admin_driver_active() if is_adm else kb_driver_active(),
+        label = f"🚀 Маршрут #{route_id} розпочато!"
+        group_label = f"🚀 Водій {user['full_name']} розпочав маршрут #{route_id}"
+
+    try:
+        await message.bot.send_message(
+            GROUP_CHAT_ID,
+            f"{group_label}\n⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}",
         )
-        try:
-            await message.bot.send_message(
-                GROUP_CHAT_ID,
-                f"🚀 Водій {user['full_name']} розпочав маршрут #{route_id}\n"
-                f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}",
-            )
-        except Exception as e:
-            logger.warning("Не вдалося надіслати старт в груповий чат: %s", e)
+    except Exception as e:
+        logger.warning("Не вдалося надіслати старт в груповий чат: %s", e)
+
+    await state.update_data(start_route_id=route_id, start_is_adm=is_adm)
+    await state.set_state(WaypointState.waiting_for_start_location)
+    await message.answer(
+        f"{label}\n"
+        f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}\n\n"
+        "📍 Надішли своє місцезнаходження для фіксації старту маршруту.",
+        reply_markup=kb_admin_driver_active() if is_adm else kb_driver_active(),
+    )
 
 
 # ── /end_route ────────────────────────────────────────────────────────────────
 
 @router.message(Command("end_route"))
-async def cmd_end_route(message: Message):
+async def cmd_end_route(message: Message, state: FSMContext):
     user_id = message.from_user.id
 
     if not await _approved(user_id):
@@ -144,6 +154,7 @@ async def cmd_end_route(message: Message):
                 )
             except Exception:
                 pass
+
     now = datetime.now().isoformat()
     await end_route(active["id"], now, total_km)
 
@@ -153,22 +164,83 @@ async def cmd_end_route(message: Message):
     minutes = rem // 60
 
     user = await get_user(user_id)
-    summary = (
+    is_adm = user_id in ADMIN_IDS or user_id in SUPER_ADMIN_IDS
+
+    await state.update_data(
+        odometer_route_id=active["id"],
+        odometer_total_km=total_km,
+        odometer_user_name=user["full_name"],
+        odometer_waypoint_count=len(waypoints),
+        odometer_duration=f"{hours}г {minutes}хв",
+        odometer_time=datetime.now().strftime('%H:%M %d.%m.%Y'),
+        odometer_is_adm=is_adm,
+    )
+    await state.set_state(OdometerState.waiting_for_odometer)
+
+    await message.answer(
         f"🏁 Маршрут #{active['id']} завершено!\n\n"
-        f"👤 {user['full_name']}\n"
-        f"📍 Точок: {len(waypoints)}\n"
-        f"🛣 Відстань: {total_km:.2f} км\n"
-        f"⏱ Тривалість: {hours}г {minutes}хв\n"
-        f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}"
+        f"📟 Скільки показує одометр?\n"
+        f"Введіть ціле число км (наприклад: 15420)\n"
+        f"або /пропустити якщо одометру немає",
+        reply_markup=kb_admin_driver_idle() if is_adm else kb_driver_idle(),
     )
 
-    is_adm = user_id in ADMIN_IDS or user_id in SUPER_ADMIN_IDS
-    await message.answer(summary, reply_markup=kb_admin_driver_idle() if is_adm else kb_driver_idle())
 
-    # Надіслати звіт адмінам і в груповий чат
+# ── Одометр після Фінішу ──────────────────────────────────────────────────────
+
+@router.message(OdometerState.waiting_for_odometer)
+async def handle_odometer_input(message: Message, state: FSMContext):
+    data = await state.get_data()
+    await state.clear()
+
+    route_id    = data["odometer_route_id"]
+    total_km    = data["odometer_total_km"]
+    user_name   = data["odometer_user_name"]
+    wp_count    = data["odometer_waypoint_count"]
+    duration    = data["odometer_duration"]
+    time_str    = data["odometer_time"]
+    is_adm      = data["odometer_is_adm"]
+
+    odometer_km = None
+    text = (message.text or "").strip()
+
+    if text and text != "/пропустити":
+        try:
+            val = int(text)
+            if val > 0:
+                odometer_km = float(val)
+                await save_odometer(route_id, odometer_km)
+        except ValueError:
+            pass
+
+    # Будуємо summary
+    summary = (
+        f"🏁 Маршрут #{route_id} завершено!\n\n"
+        f"👤 {user_name}\n"
+        f"📍 Точок: {wp_count}\n"
+        f"🛣 Відстань: {total_km:.2f} км (програма)\n"
+    )
+    diff = None
+    if odometer_km is not None:
+        diff = abs(total_km - odometer_km) / odometer_km * 100 if odometer_km > 0 else 0.0
+        summary += f"📟 Одометр: {odometer_km:.0f} км\n"
+        summary += f"📊 Розбіжність: {diff:.1f}%\n"
+    summary += f"⏱ Тривалість: {duration}\n"
+    summary += f"⏰ {time_str}"
+
+    await message.answer(summary)
+
+    # Повідомлення адмінам (з алертом при розбіжності > 30%)
+    admin_msg = summary
+    if diff is not None and diff > 30:
+        admin_msg += (
+            f"\n\n⚠️ Велика розбіжність: {user_name} "
+            f"програма {total_km:.1f} км / одометр {odometer_km:.0f} км ({diff:.1f}%)"
+        )
+
     for admin_id in ADMIN_IDS:
         try:
-            await message.bot.send_message(admin_id, summary)
+            await message.bot.send_message(admin_id, admin_msg)
         except Exception as e:
             logger.warning("Не вдалося надіслати фініш адміну %s: %s", admin_id, e)
 
@@ -180,6 +252,34 @@ async def cmd_end_route(message: Message):
 
 # ── Геолокація ────────────────────────────────────────────────────────────────
 
+# Геомітка старту маршруту (обробляється до загального handle_location!)
+@router.message(F.location, WaypointState.waiting_for_start_location)
+async def handle_start_location(message: Message, state: FSMContext):
+    data = await state.get_data()
+    route_id = data.get("start_route_id")
+    is_adm   = data.get("start_is_adm", False)
+    await state.clear()
+
+    if not route_id:
+        return
+
+    lat = message.location.latitude
+    lon = message.location.longitude
+    now = datetime.now().isoformat()
+    await add_waypoint(route_id, lat, lon, "Старт", now, False)
+
+    user = await get_user(message.from_user.id)
+    await message.answer(
+        "✅ Старт зафіксовано! Удачної дороги!",
+        reply_markup=kb_admin_driver_active() if is_adm else kb_driver_active(),
+    )
+    try:
+        await message.bot.send_location(GROUP_CHAT_ID, latitude=lat, longitude=lon)
+        await message.bot.send_message(GROUP_CHAT_ID, f"📍 {user['full_name']} — Старт")
+    except Exception as e:
+        logger.warning("Не вдалося надіслати старт-геомітку в груповий чат: %s", e)
+
+
 @router.message(F.location)
 async def handle_location(message: Message, state: FSMContext):
     user_id = message.from_user.id
@@ -187,13 +287,15 @@ async def handle_location(message: Message, state: FSMContext):
     if not await _approved(user_id):
         return
 
-    if not await get_active_route(user_id):
+    route = await get_todays_route(user_id)
+    if not route:
         await message.answer("❌ Спочатку почніть маршрут: /start_route")
         return
 
     await state.update_data(
         pending_lat=message.location.latitude,
         pending_lon=message.location.longitude,
+        pending_route_id=route["id"],
     )
     await state.set_state(WaypointState.waiting_for_name)
     await message.answer("📍 Геолокацію отримано. Введіть назву точки:")
@@ -207,23 +309,19 @@ async def handle_waypoint_name(message: Message, state: FSMContext):
     data = await state.get_data()
     lat = data.get("pending_lat")
     lon = data.get("pending_lon")
+    route_id = data.get("pending_route_id")
     await state.clear()
 
-    if lat is None or lon is None:
+    if lat is None or lon is None or route_id is None:
         await message.answer("❌ Помилка: геолокація не знайдена. Надішліть знову.")
-        return
-
-    active = await get_active_route(user_id)
-    if not active:
-        await message.answer("❌ Немає активного маршруту.")
         return
 
     now = datetime.now().isoformat()
 
     # РЕБ-спуфінг перевірка — порівнюємо з останньою валідною точкою
-    last_wp = await get_last_valid_waypoint(active["id"])
+    last_wp = await get_last_valid_waypoint(route_id)
     if last_wp is None:
-        last_wp = await get_last_waypoint(active["id"])  # fallback: всі попередні підозрілі
+        last_wp = await get_last_waypoint(route_id)  # fallback: всі попередні підозрілі
     suspicious = False
     if last_wp:
         suspicious = check_suspicious(
@@ -232,7 +330,7 @@ async def handle_waypoint_name(message: Message, state: FSMContext):
             MAX_DISTANCE_KM, MIN_TIME_MINUTES,
         )
 
-    await add_waypoint(active["id"], lat, lon, point_name, now, suspicious)
+    await add_waypoint(route_id, lat, lon, point_name, now, suspicious)
 
     user = await get_user(user_id)
     flag = "⚠️" if suspicious else "📍"
@@ -262,7 +360,7 @@ async def handle_waypoint_name(message: Message, state: FSMContext):
             f"👤 {user['full_name']} (ID: {user_id})\n"
             f"📍 {point_name}\n"
             f"📌 {lat:.5f}, {lon:.5f}\n"
-            f"Маршрут #{active['id']}"
+            f"Маршрут #{route_id}"
         )
         for admin_id in ADMIN_IDS:
             try:

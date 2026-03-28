@@ -46,6 +46,13 @@ async def init_db():
             )
         except Exception:
             pass  # колонка вже існує
+        # Міграція: odometer_km — показник одометра водія при завершенні маршруту
+        try:
+            await db.execute(
+                "ALTER TABLE routes ADD COLUMN odometer_km REAL DEFAULT NULL"
+            )
+        except Exception:
+            pass  # колонка вже існує
         await db.commit()
 
 
@@ -160,6 +167,38 @@ async def end_route(route_id: int, end_time: str, total_km: float):
         await db.commit()
 
 
+async def save_odometer(route_id: int, odometer_km: float):
+    """Зберігає показник одометра для завершеного маршруту."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE routes SET odometer_km = ? WHERE id = ?",
+            (odometer_km, route_id),
+        )
+        await db.commit()
+
+
+async def get_todays_route(driver_id: int) -> Optional[Dict]:
+    """Повертає активний маршрут або останній завершений за сьогодні.
+
+    Використовується для збереження waypoints незалежно від того,
+    чи водій вже натиснув Фініш і ще не натиснув новий Старт.
+    Активний маршрут (is_active=1) має пріоритет над завершеним.
+    """
+    today = datetime.now().date().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """
+            SELECT * FROM routes
+            WHERE driver_id = ? AND DATE(start_time) = ?
+            ORDER BY is_active DESC, id DESC LIMIT 1
+            """,
+            (driver_id, today),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
 async def get_todays_finished_route(driver_id: int) -> Optional[Dict]:
     """Повертає останній завершений маршрут водія за сьогодні (is_active=0)."""
     today = datetime.now().date().isoformat()
@@ -194,10 +233,10 @@ async def get_all_active_routes_today() -> List[Dict]:
 
 
 async def reactivate_route(route_id: int):
-    """Повертає завершений маршрут в активний стан (is_active=1, end_time=NULL, total_km=0)."""
+    """Повертає завершений маршрут в активний стан (is_active=1, end_time=NULL, total_km=0, odometer_km=NULL)."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "UPDATE routes SET is_active = 1, end_time = NULL, total_km = 0 WHERE id = ?",
+            "UPDATE routes SET is_active = 1, end_time = NULL, total_km = 0, odometer_km = NULL WHERE id = ?",
             (route_id,),
         )
         await db.commit()
@@ -304,6 +343,7 @@ async def get_daily_stats(date_str: str) -> List[Dict]:
             SELECT u.full_name,
                    u.telegram_id,
                    COALESCE(SUM(r.total_km), 0)        AS total_km,
+                   SUM(r.odometer_km)                  AS total_odometer_km,
                    MIN(r.start_time)                   AS first_start,
                    MAX(COALESCE(r.end_time, datetime('now'))) AS last_end,
                    COALESCE(wc.wcount, 0)              AS waypoint_count

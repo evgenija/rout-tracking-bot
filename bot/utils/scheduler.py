@@ -35,9 +35,14 @@ async def send_daily_report(bot: Bot):
         lines = [f"📊 Щоденний звіт за {today}\n"]
         for s in stats:
             duration = format_duration(s["first_start"], s["last_end"])
+            km_line = f"   🛣 {s['total_km']:.1f} км (прогр.)"
+            odo = s.get("total_odometer_km")
+            if odo:
+                diff = abs(s["total_km"] - odo) / odo * 100 if odo > 0 else 0.0
+                km_line += f" | 📟 {odo:.0f} км (одом.) | δ {diff:.1f}%"
             lines.append(
                 f"👤 {s['full_name']}\n"
-                f"   🛣 {s['total_km']:.1f} км\n"
+                f"{km_line}\n"
                 f"   ⏱ {duration}"
             )
         text = "\n\n".join(lines)
