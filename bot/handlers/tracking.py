@@ -82,29 +82,36 @@ async def cmd_start_route(message: Message, state: FSMContext):
         # Продовжуємо завершений маршрут за сьогодні
         await reactivate_route(todays_route["id"])
         route_id = todays_route["id"]
-        time_finish = (
-            datetime.fromisoformat(todays_route["end_time"]).strftime("%H:%M")
+        now_dt = datetime.now()
+        finish_dt = (
+            datetime.fromisoformat(todays_route["end_time"])
             if todays_route.get("end_time")
-            else "невідомо"
+            else now_dt
         )
-        time_restart = datetime.now().strftime("%H:%M")
+        time_finish = finish_dt.strftime("%H:%M")
+        time_restart = now_dt.strftime("%H:%M")
+        date_str = now_dt.strftime("%d.%m.%Y")
+        duration_min = max(0, int((now_dt - finish_dt).total_seconds() / 60))
         label = f"▶️ Маршрут #{route_id} продовжено!"
         group_label = (
             f"🔄 Маршрут {user['full_name']} поновлено після перерви\n"
             f"⏸ Перерва з {time_finish} до {time_restart}\n"
-            f"⚠️ Геомітки за цей період не збережені"
+            f"⏱ Тривалість перерви: {duration_min} хв\n"
+            f"🕐 {time_restart} {date_str}"
         )
+        group_time_suffix = ""  # час вже в group_label
     else:
         # Новий маршрут
         now = datetime.now().isoformat()
         route_id = await start_route(user_id, now)
         label = f"🚀 Маршрут #{route_id} розпочато!"
         group_label = f"🚀 Водій {user['full_name']} розпочав маршрут #{route_id}"
+        group_time_suffix = f"\n⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}"
 
     try:
         await message.bot.send_message(
             GROUP_CHAT_ID,
-            f"{group_label}\n⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}",
+            f"{group_label}{group_time_suffix}",
         )
     except Exception as e:
         logger.warning("Не вдалося надіслати старт в груповий чат: %s", e)
