@@ -616,6 +616,30 @@ async def fix_suspicious_for_route(route_id: int) -> Dict:
     return {"fixed": fixed, "total": len(waypoints), "old_km": old_km, "new_km": new_km}
 
 
+async def get_routes_in_date_range(date_from: str, date_to: str) -> List[Dict]:
+    """Повертає всі маршрути з date_from по date_to включно з ім'ям водія та кількістю підозрілих точок."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """
+            SELECT r.id, r.driver_id, r.total_km, r.is_active,
+                   DATE(r.start_time) AS date,
+                   u.full_name,
+                   COUNT(w.id)                                   AS total_wp,
+                   SUM(CASE WHEN w.is_suspicious = 1 THEN 1 ELSE 0 END) AS suspicious_wp
+            FROM routes r
+            JOIN users u ON r.driver_id = u.telegram_id
+            LEFT JOIN waypoints w ON w.route_id = r.id
+            WHERE DATE(r.start_time) BETWEEN ? AND ?
+            GROUP BY r.id
+            ORDER BY r.driver_id, r.start_time
+            """,
+            (date_from, date_to),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
 async def get_weekly_stats(start_date: str, end_date: str) -> List[Dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row

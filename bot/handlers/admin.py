@@ -17,6 +17,7 @@ from bot.models.database import (
     get_weekly_stats_by_day,
     get_route_info,
     get_route_waypoints,
+    get_routes_in_date_range,
     set_manual_km,
     clear_manual_km,
     fix_suspicious_for_route,
@@ -558,6 +559,85 @@ async def cmd_fix_route_suspicious(message: Message):
         f"Оновлено прапорів: {result['fixed']}/{result['total']}\n"
         f"total_km: {result['old_km']:.1f} → {result['new_km']:.1f} км"
     )
+
+
+@router.message(Command("fix_range"))
+async def cmd_fix_range(message: Message):
+    """Перераховує is_suspicious і total_km для всіх маршрутів у діапазоні дат.
+
+    Використання: /fix_range 2026-03-24 2026-03-28
+    """
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Недостатньо прав.")
+        return
+
+    parts = message.text.split()
+    if len(parts) != 3:
+        await message.answer("Використання: /fix_range YYYY-MM-DD YYYY-MM-DD\nПриклад: /fix_range 2026-03-24 2026-03-28")
+        return
+
+    date_from, date_to = parts[1], parts[2]
+    await message.answer(f"⏳ Скануємо маршрути {date_from} — {date_to}...")
+
+    routes_before = await get_routes_in_date_range(date_from, date_to)
+    if not routes_before:
+        await message.answer("❌ Маршрутів за вказаний діапазон не знайдено.")
+        return
+
+    # Знімок «до»: {route_id: {km, suspicious_wp, total_wp, ...}}
+    before = {r["id"]: r for r in routes_before}
+
+    # Запускаємо fix_suspicious_for_route для кожного маршруту
+    fix_results = {}
+    for route_id in before:
+        fix_results[route_id] = await fix_suspicious_for_route(route_id)
+
+    # Знімок «після»
+    routes_after = await get_routes_in_date_range(date_from, date_to)
+    after = {r["id"]: r for r in routes_after}
+
+    # Будуємо звіт, згрупований по водію → по дню
+    from collections import defaultdict
+    by_driver = defaultdict(list)
+    for route_id, b in before.items():
+        a = after.get(route_id, b)
+        fx = fix_results.get(route_id, {})
+        by_driver[b["full_name"]].append({
+            "date":         b["date"],
+            "route_id":     route_id,
+            "km_before":    b["total_km"],
+            "km_after":     a["total_km"],
+            "susp_before":  b["suspicious_wp"],
+            "susp_after":   a["suspicious_wp"],
+            "total_wp":     b["total_wp"],
+            "changed":      fx.get("fixed", 0),
+        })
+
+    lines = [f"📊 Звіт fix_range {date_from} — {date_to}\n"]
+    total_cleared = 0
+    total_reb = 0
+
+    for driver_name in sorted(by_driver):
+        lines.append(f"👤 {driver_name}")
+        for row in sorted(by_driver[driver_name], key=lambda x: x["date"]):
+            cleared = max(0, row["susp_before"] - row["susp_after"])
+            reb     = row["susp_after"]
+            total_cleared += cleared
+            total_reb     += reb
+
+            km_delta = row["km_after"] - row["km_before"]
+            delta_str = f"+{km_delta:.1f}" if km_delta >= 0 else f"{km_delta:.1f}"
+            lines.append(
+                f"  {row['date']} | #{row['route_id']} | "
+                f"km: {row['km_before']:.1f} → {row['km_after']:.1f} ({delta_str}) | "
+                f"valid+{cleared} / РЕБ {reb} залишилось"
+            )
+        lines.append("")
+
+    lines.append(f"✅ Разом знято suspicious: {total_cleared}")
+    lines.append(f"🚨 РЕБ-точок залишилось suspicious: {total_reb} (контроль)")
+
+    await message.answer("\n".join(lines))
 
 
 @router.message(Command("cancel"))
