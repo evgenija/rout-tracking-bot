@@ -22,6 +22,7 @@ from bot.models.database import (
     get_user,
     reactivate_route,
     save_odometer,
+    save_odometer_start,
     start_route,
 )
 from bot.utils.geo import get_road_distance_for_route
@@ -34,10 +35,12 @@ router = Router()
 class WaypointState(StatesGroup):
     waiting_for_name = State()
     waiting_for_start_location = State()
+    waiting_for_start_odometer = State()
 
 
 class OdometerState(StatesGroup):
-    waiting_for_odometer = State()
+    waiting_for_finish_location = State()
+    waiting_for_finish_odometer = State()
 
 
 # ── Auth helper ───────────────────────────────────────────────────────────────
@@ -141,105 +144,141 @@ async def cmd_end_route(message: Message, state: FSMContext):
         await message.answer("❌ Немає активного маршруту.")
         return
 
-    waypoints = await get_route_waypoints(active["id"])
+    user = await get_user(user_id)
+    is_adm = user_id in ADMIN_IDS or user_id in SUPER_ADMIN_IDS
+
+    await state.update_data(
+        finish_route_id=active["id"],
+        finish_start_time=active["start_time"],
+        finish_is_adm=is_adm,
+        finish_user_name=user["full_name"],
+    )
+    await state.set_state(OdometerState.waiting_for_finish_location)
+    await message.answer(
+        "🏁 Завершення маршруту\n\n"
+        "📍 Надішли своє місцезнаходження для фіксації фінішу.",
+        reply_markup=kb_admin_driver_active() if is_adm else kb_driver_active(),
+    )
+
+
+# ── Геомітка та одометр Фінішу ────────────────────────────────────────────────
+
+@router.message(F.location, OdometerState.waiting_for_finish_location)
+async def handle_finish_location(message: Message, state: FSMContext):
+    data = await state.get_data()
+    route_id   = data.get("finish_route_id")
+    is_adm     = data.get("finish_is_adm", False)
+    user_name  = data.get("finish_user_name", "")
+    start_time = data.get("finish_start_time")
+
+    if not route_id:
+        await state.clear()
+        return
+
+    lat = message.location.latitude
+    lon = message.location.longitude
+    now = datetime.now().isoformat()
+    await add_waypoint(route_id, lat, lon, "Фініш", now, False)
+
+    # Розрахунок кілометражу (включно з точкою Фінішу)
+    waypoints = await get_route_waypoints(route_id)
     total_km = await get_road_distance_for_route(waypoints)
     if total_km > 1000:
         from bot.utils.geo import calculate_route_distance
         suspicious_count = sum(1 for wp in waypoints if wp.get("is_suspicious"))
         logger.warning(
             "Маршрут #%s: аномальний km=%.2f (підозрілих %d/%d) — fallback haversine×1.4",
-            active["id"], total_km, suspicious_count, len(waypoints),
+            route_id, total_km, suspicious_count, len(waypoints),
         )
         total_km = round(calculate_route_distance(waypoints) * 1.4, 2)
         for admin_id in ADMIN_IDS:
             try:
                 await message.bot.send_message(
                     admin_id,
-                    f"⚠️ Маршрут #{active['id']}: аномальний кілометраж скинуто.\n"
+                    f"⚠️ Маршрут #{route_id}: аномальний кілометраж скинуто.\n"
                     f"Збережено: {total_km:.1f} км (haversine×1.4)\n"
                     f"Підозрілих точок: {suspicious_count}/{len(waypoints)}",
                 )
             except Exception:
                 pass
 
-    now = datetime.now().isoformat()
-    await end_route(active["id"], now, total_km)
+    try:
+        await message.bot.send_location(GROUP_CHAT_ID, latitude=lat, longitude=lon)
+        await message.bot.send_message(GROUP_CHAT_ID, f"🏁 {user_name} — Фініш")
+    except Exception as e:
+        logger.warning("Не вдалося надіслати фініш-геомітку в груповий чат: %s", e)
 
-    start_dt = datetime.fromisoformat(active["start_time"])
+    start_dt = datetime.fromisoformat(start_time) if start_time else datetime.now()
     delta = datetime.now() - start_dt
     hours, rem = divmod(int(delta.total_seconds()), 3600)
     minutes = rem // 60
 
-    user = await get_user(user_id)
-    is_adm = user_id in ADMIN_IDS or user_id in SUPER_ADMIN_IDS
-
     await state.update_data(
-        odometer_route_id=active["id"],
-        odometer_total_km=total_km,
-        odometer_user_name=user["full_name"],
-        odometer_waypoint_count=len(waypoints),
-        odometer_duration=f"{hours}г {minutes}хв",
-        odometer_time=datetime.now().strftime('%H:%M %d.%m.%Y'),
-        odometer_is_adm=is_adm,
+        finish_total_km=total_km,
+        finish_waypoint_count=len(waypoints),
+        finish_duration=f"{hours}г {minutes}хв",
+        finish_time=datetime.now().strftime('%H:%M %d.%m.%Y'),
+        finish_end_time=now,
     )
-    await state.set_state(OdometerState.waiting_for_odometer)
-
+    await state.set_state(OdometerState.waiting_for_finish_odometer)
     await message.answer(
-        f"🏁 Маршрут #{active['id']} завершено!\n\n"
-        f"📟 Скільки показує одометр?\n"
-        f"Введіть ціле число км (наприклад: 15420)\n"
-        f"або /пропустити якщо одометру немає",
-        reply_markup=kb_admin_driver_idle() if is_adm else kb_driver_idle(),
+        "✅ Фініш зафіксовано!\n\n"
+        "🚗 Введіть поточний показник одометра (ціле число, км):\n"
+        "Наприклад: 15800",
+        reply_markup=kb_admin_driver_active() if is_adm else kb_driver_active(),
     )
 
 
-# ── Одометр після Фінішу ──────────────────────────────────────────────────────
-
-@router.message(OdometerState.waiting_for_odometer)
-async def handle_odometer_input(message: Message, state: FSMContext):
+@router.message(OdometerState.waiting_for_finish_odometer)
+async def handle_finish_odometer(message: Message, state: FSMContext):
     data = await state.get_data()
-    await state.clear()
 
-    route_id    = data["odometer_route_id"]
-    total_km    = data["odometer_total_km"]
-    user_name   = data["odometer_user_name"]
-    wp_count    = data["odometer_waypoint_count"]
-    duration    = data["odometer_duration"]
-    time_str    = data["odometer_time"]
-    is_adm      = data["odometer_is_adm"]
+    route_id  = data["finish_route_id"]
+    total_km  = data["finish_total_km"]
+    user_name = data["finish_user_name"]
+    wp_count  = data["finish_waypoint_count"]
+    duration  = data["finish_duration"]
+    time_str  = data["finish_time"]
+    end_time  = data.get("finish_end_time", datetime.now().isoformat())
+    is_adm    = data["finish_is_adm"]
 
+    text = (message.text or "").strip().replace(",", ".")
     odometer_km = None
-    text = (message.text or "").strip()
+    try:
+        val = float(text)
+        if val > 0:
+            odometer_km = val
+    except ValueError:
+        pass
 
-    if text and text != "/пропустити":
-        try:
-            val = int(text)
-            if val > 0:
-                odometer_km = float(val)
-                await save_odometer(route_id, odometer_km)
-        except ValueError:
-            pass
+    if odometer_km is None:
+        await message.answer(
+            "⚠️ Одометр обов'язковий для завершення маршруту.\n"
+            "Введіть поточний показник одометра (ціле число, км):\n"
+            "Наприклад: 15800"
+        )
+        return  # стан залишається waiting_for_finish_odometer
 
-    # Будуємо summary
+    await state.clear()
+    await end_route(route_id, end_time, total_km)
+    await save_odometer(route_id, odometer_km)
+
+    diff = abs(total_km - odometer_km) / odometer_km * 100 if odometer_km > 0 else 0.0
     summary = (
         f"🏁 Маршрут #{route_id} завершено!\n\n"
         f"👤 {user_name}\n"
         f"📍 Точок: {wp_count}\n"
         f"🛣 Відстань: {total_km:.2f} км (програма)\n"
+        f"📟 Одометр: {odometer_km:.0f} км\n"
+        f"📊 Розбіжність: {diff:.1f}%\n"
+        f"⏱ Тривалість: {duration}\n"
+        f"⏰ {time_str}"
     )
-    diff = None
-    if odometer_km is not None:
-        diff = abs(total_km - odometer_km) / odometer_km * 100 if odometer_km > 0 else 0.0
-        summary += f"📟 Одометр: {odometer_km:.0f} км\n"
-        summary += f"📊 Розбіжність: {diff:.1f}%\n"
-    summary += f"⏱ Тривалість: {duration}\n"
-    summary += f"⏰ {time_str}"
 
-    await message.answer(summary)
+    await message.answer(summary, reply_markup=kb_admin_driver_idle() if is_adm else kb_driver_idle())
 
-    # Повідомлення адмінам (з алертом при розбіжності > 30%)
     admin_msg = summary
-    if diff is not None and diff > 30:
+    if diff > 30:
         admin_msg += (
             f"\n\n⚠️ Велика розбіжність: {user_name} "
             f"програма {total_km:.1f} км / одометр {odometer_km:.0f} км ({diff:.1f}%)"
@@ -265,9 +304,9 @@ async def handle_start_location(message: Message, state: FSMContext):
     data = await state.get_data()
     route_id = data.get("start_route_id")
     is_adm   = data.get("start_is_adm", False)
-    await state.clear()
 
     if not route_id:
+        await state.clear()
         return
 
     lat = message.location.latitude
@@ -276,15 +315,56 @@ async def handle_start_location(message: Message, state: FSMContext):
     await add_waypoint(route_id, lat, lon, "Старт", now, False)
 
     user = await get_user(message.from_user.id)
-    await message.answer(
-        "✅ Старт зафіксовано! Удачної дороги!",
-        reply_markup=kb_admin_driver_active() if is_adm else kb_driver_active(),
-    )
     try:
         await message.bot.send_location(GROUP_CHAT_ID, latitude=lat, longitude=lon)
         await message.bot.send_message(GROUP_CHAT_ID, f"📍 {user['full_name']} — Старт")
     except Exception as e:
         logger.warning("Не вдалося надіслати старт-геомітку в груповий чат: %s", e)
+
+    # Переходимо до запиту одометра (зберігаємо route_id і is_adm)
+    await state.update_data(start_route_id=route_id, start_is_adm=is_adm)
+    await state.set_state(WaypointState.waiting_for_start_odometer)
+    await message.answer(
+        "✅ Старт зафіксовано!\n\n"
+        "🚗 Введіть поточний показник одометра (ціле число, км):\n"
+        "Наприклад: 15420",
+        reply_markup=kb_admin_driver_active() if is_adm else kb_driver_active(),
+    )
+
+
+@router.message(WaypointState.waiting_for_start_odometer)
+async def handle_start_odometer_input(message: Message, state: FSMContext):
+    data = await state.get_data()
+    route_id = data.get("start_route_id")
+    is_adm   = data.get("start_is_adm", False)
+
+    if not route_id:
+        await state.clear()
+        return
+
+    text = (message.text or "").strip().replace(",", ".")
+    odometer_start = None
+    try:
+        val = float(text)
+        if val > 0:
+            odometer_start = val
+    except ValueError:
+        pass
+
+    if odometer_start is None:
+        await message.answer(
+            "⚠️ Одометр обов'язковий для старту маршруту.\n"
+            "Введіть поточний показник одометра (ціле число, км):\n"
+            "Наприклад: 15420"
+        )
+        return  # стан залишається waiting_for_start_odometer
+
+    await state.clear()
+    await save_odometer_start(route_id, odometer_start)
+    await message.answer(
+        f"🚗 Одометр {odometer_start:.0f} км зафіксовано. Удачної дороги!",
+        reply_markup=kb_admin_driver_active() if is_adm else kb_driver_active(),
+    )
 
 
 @router.message(F.location)

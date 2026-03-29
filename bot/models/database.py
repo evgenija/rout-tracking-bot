@@ -53,6 +53,13 @@ async def init_db():
             )
         except Exception:
             pass  # колонка вже існує
+        # Міграція: odometer_start — показник одометра при старті маршруту
+        try:
+            await db.execute(
+                "ALTER TABLE routes ADD COLUMN odometer_start REAL DEFAULT NULL"
+            )
+        except Exception:
+            pass  # колонка вже існує
         await db.commit()
 
 
@@ -163,6 +170,16 @@ async def end_route(route_id: int, end_time: str, total_km: float):
         await db.execute(
             "UPDATE routes SET end_time = ?, total_km = ?, is_active = 0 WHERE id = ?",
             (end_time, total_km, route_id),
+        )
+        await db.commit()
+
+
+async def save_odometer_start(route_id: int, odometer_start: float):
+    """Зберігає показник одометра при старті маршруту."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE routes SET odometer_start = ? WHERE id = ?",
+            (odometer_start, route_id),
         )
         await db.commit()
 

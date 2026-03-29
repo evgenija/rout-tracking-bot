@@ -126,7 +126,10 @@ async def auto_close_active_routes(bot: Bot):
                     await bot.send_message(
                         admin_id,
                         f"⚠️ Маршрут #{route_id} ({route['full_name']}) закрито автоматично "
-                        f"(водій не натиснув Фініш). Пробіг: {total_km:.1f} км",
+                        f"(водій не натиснув Фініш). Пробіг: {total_km:.1f} км\n\n"
+                        f"⚠️ Маршрут {route['full_name']} закрито без показника одометра "
+                        f"(авто-закриття о 23:59)\n"
+                        f"📌 Одометр не зафіксовано — порівняння недоступне",
                     )
                 except Exception as e:
                     logger.warning("Не вдалося надіслати авто-закриття адміну %s: %s", admin_id, e)
