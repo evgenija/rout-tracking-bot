@@ -644,6 +644,30 @@ async def cmd_fix_range(message: Message):
     await message.answer("\n".join(lines))
 
 
+@router.message(Command("send_route31_correction"))
+async def cmd_send_route31_correction(message: Message):
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Недостатньо прав.")
+        return
+    from bot.config import GROUP_CHAT_ID
+    text = (
+        "🏁 Маршрут #31 завершено! (оновлено)\n"
+        "👤 ZAZA PITIURISHVILI\n"
+        "📍 Точок: 6\n"
+        "🛣 Відстань: 132.4 км (програма)\n"
+        "⏱ Тривалість: 5г 41хв\n"
+        "⏰ 14:39 30.03.2026\n\n"
+        "📌 Одометр: 597501 → 597664 км\n"
+        "   Пробіг за одометром: 163 км\n"
+        "   Трекінг: 132.4 км\n"
+        "   Похибка: 18.8%  ⚠️ Місто/Waze (очікувано)\n\n"
+        "ℹ️ Попереднє повідомлення містило помилку розрахунку —\n"
+        "це виправлена версія."
+    )
+    await message.bot.send_message(GROUP_CHAT_ID, text)
+    await message.answer("✅ Надіслано в груповий чат.")
+
+
 @router.message(Command("check_odometer_31"))
 async def cmd_check_odometer_31(message: Message):
     if not is_admin(message.from_user.id):
