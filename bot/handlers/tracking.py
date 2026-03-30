@@ -57,6 +57,69 @@ def _is_silent_driver(user_id: int) -> bool:
     return user_id in ADMIN_IDS or user_id in SUPER_ADMIN_IDS
 
 
+def _format_odometer_accuracy(
+    total_km: float,
+    odometer_start,
+    odometer_km,
+) -> tuple:
+    """Повертає (текст_секції, потрібен_алерт).
+
+    Обробляє 5 сценаріїв наявності/відсутності одометрових даних.
+    Алерт = True тільки в сценарії 1 (обидва введено, diff > 0) при похибці > 30%.
+    """
+    has_start  = odometer_start is not None
+    has_finish = odometer_km is not None
+
+    if has_start and has_finish:
+        odometer_diff = odometer_km - odometer_start
+        if odometer_diff <= 0:
+            # Сценарій 5 — помилка вводу
+            text = (
+                f"📌 Одометр: {odometer_start:.0f} → {odometer_km:.0f} км\n"
+                f"   ⚠️ Помилка вводу — показник фінішу менший за старт"
+            )
+            return text, False
+
+        # Сценарій 1 — обидва введено, diff > 0
+        diff_pct = abs(total_km - odometer_diff) / odometer_diff * 100
+        if diff_pct <= 10:
+            label = "✅ Норма"
+        elif diff_pct <= 25:
+            label = "⚠️ Місто/Waze (очікувано)"
+        elif diff_pct <= 40:
+            label = "🔶 Перевірити маршрут"
+        else:
+            label = "🔴 Критична розбіжність"
+        text = (
+            f"📌 Одометр: {odometer_start:.0f} → {odometer_km:.0f} км\n"
+            f"   Пробіг за одометром: {odometer_diff:.1f} км\n"
+            f"   Трекінг: {total_km:.2f} км\n"
+            f"   Похибка: {diff_pct:.1f}%  {label}"
+        )
+        return text, diff_pct > 30
+
+    if not has_start and has_finish:
+        # Сценарій 2
+        text = (
+            f"📌 Одометр при старті не введено\n"
+            f"   Одометр фінішу: {odometer_km:.0f} км\n"
+            f"   ⚠️ Порівняння недоступне — водій не ввів одометр на старті"
+        )
+        return text, False
+
+    if has_start and not has_finish:
+        # Сценарій 3
+        text = (
+            f"📌 Одометр старту: {odometer_start:.0f} км\n"
+            f"   Одометр при фінішу не введено\n"
+            f"   ⚠️ Порівняння недоступне — водій не ввів одометр на фінішу"
+        )
+        return text, False
+
+    # Сценарій 4 — жодного
+    return "📌 Одометр не введено ні на старті ні на фінішу\n   ⚠️ Порівняння недоступне", False
+
+
 # ── Кнопки Reply Keyboard (дублюють команди) ─────────────────────────────────
 
 @router.message(F.text == "🚀 Почати маршрут")
@@ -158,6 +221,7 @@ async def cmd_end_route(message: Message, state: FSMContext):
         finish_start_time=active["start_time"],
         finish_is_adm=is_adm,
         finish_user_name=user["full_name"],
+        finish_odometer_start=active.get("odometer_start"),
     )
     await state.set_state(OdometerState.waiting_for_finish_location)
     await message.answer(
@@ -240,14 +304,15 @@ async def handle_finish_location(message: Message, state: FSMContext):
 async def handle_finish_odometer(message: Message, state: FSMContext):
     data = await state.get_data()
 
-    route_id  = data["finish_route_id"]
-    total_km  = data["finish_total_km"]
-    user_name = data["finish_user_name"]
-    wp_count  = data["finish_waypoint_count"]
-    duration  = data["finish_duration"]
-    time_str  = data["finish_time"]
-    end_time  = data.get("finish_end_time", datetime.now().isoformat())
-    is_adm    = data["finish_is_adm"]
+    route_id      = data["finish_route_id"]
+    total_km      = data["finish_total_km"]
+    user_name     = data["finish_user_name"]
+    wp_count      = data["finish_waypoint_count"]
+    duration      = data["finish_duration"]
+    time_str      = data["finish_time"]
+    end_time      = data.get("finish_end_time", datetime.now().isoformat())
+    is_adm        = data["finish_is_adm"]
+    odometer_start = data.get("finish_odometer_start")
 
     text = (message.text or "").strip().replace(",", ".")
     odometer_km = None
@@ -270,26 +335,22 @@ async def handle_finish_odometer(message: Message, state: FSMContext):
     await end_route(route_id, end_time, total_km)
     await save_odometer(route_id, odometer_km)
 
-    diff = abs(total_km - odometer_km) / odometer_km * 100 if odometer_km > 0 else 0.0
+    odo_section, should_alert = _format_odometer_accuracy(total_km, odometer_start, odometer_km)
+
     summary = (
         f"🏁 Маршрут #{route_id} завершено!\n\n"
         f"👤 {user_name}\n"
         f"📍 Точок: {wp_count}\n"
-        f"🛣 Відстань: {total_km:.2f} км (програма)\n"
-        f"📟 Одометр: {odometer_km:.0f} км\n"
-        f"📊 Розбіжність: {diff:.1f}%\n"
         f"⏱ Тривалість: {duration}\n"
-        f"⏰ {time_str}"
+        f"⏰ {time_str}\n\n"
+        f"{odo_section}"
     )
 
     await message.answer(summary, reply_markup=kb_admin_driver_idle() if is_adm else kb_driver_idle())
 
     admin_msg = summary
-    if diff > 30:
-        admin_msg += (
-            f"\n\n⚠️ Велика розбіжність: {user_name} "
-            f"програма {total_km:.1f} км / одометр {odometer_km:.0f} км ({diff:.1f}%)"
-        )
+    if should_alert:
+        admin_msg += f"\n\n⚠️ Велика розбіжність по маршруту {user_name} — перевір!"
 
     for admin_id in ADMIN_IDS:
         try:
