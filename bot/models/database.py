@@ -267,7 +267,8 @@ async def get_route_info(route_id: int) -> Optional[Dict]:
             """
             SELECT r.id, r.driver_id, u.full_name,
                    r.total_km, r.is_active, r.start_time, r.end_time,
-                   COALESCE(r.is_manual, 0) AS is_manual
+                   COALESCE(r.is_manual, 0) AS is_manual,
+                   r.odometer_start, r.odometer_km
             FROM routes r
             JOIN users u ON r.driver_id = u.telegram_id
             WHERE r.id = ?

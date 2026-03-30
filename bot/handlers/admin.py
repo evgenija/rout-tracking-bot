@@ -504,10 +504,14 @@ async def cmd_diag_route(message: Message):
 
     suspicious_count = sum(1 for wp in waypoints if wp["is_suspicious"])
     pct = suspicious_count / len(waypoints) * 100
+    odo_start = route.get("odometer_start")
+    odo_finish = route.get("odometer_km")
     lines += [
         "",
         f"📊 Всього: {len(waypoints)} | ⚠️ {suspicious_count} ({pct:.0f}%) | ✅ {len(waypoints) - suspicious_count}",
         f"total_km в БД: {route['total_km']:.1f} | haversine по валідних: {valid_km:.1f}",
+        f"📟 Одометр старту:  {f'{odo_start:.0f} км' if odo_start is not None else 'не введено'}",
+        f"📟 Одометр фінішу: {f'{odo_finish:.0f} км' if odo_finish is not None else 'не введено'}",
     ]
 
     # Відправка з розбиттям якщо > 4000 символів
@@ -642,7 +646,8 @@ async def cmd_fix_range(message: Message):
 
 @router.message(Command("check_odometer_31"))
 async def cmd_check_odometer_31(message: Message):
-    if message.from_user.id not in ADMIN_IDS and message.from_user.id not in SUPER_ADMIN_IDS:
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Недостатньо прав.")
         return
     import aiosqlite
     from bot.config import DB_PATH
