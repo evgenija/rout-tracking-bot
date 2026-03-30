@@ -36,10 +36,16 @@ async def send_daily_report(bot: Bot):
         for s in stats:
             duration = format_duration(s["first_start"], s["last_end"])
             km_line = f"   🛣 {s['total_km']:.1f} км (прогр.)"
-            odo = s.get("total_odometer_km")
-            if odo:
-                diff = abs(s["total_km"] - odo) / odo * 100 if odo > 0 else 0.0
-                km_line += f" | 📟 {odo:.0f} км (одом.) | δ {diff:.1f}%"
+            odo_delta = s.get("total_odo_delta")
+            if odo_delta and odo_delta > 0:
+                diff = abs(s["total_km"] - odo_delta) / odo_delta * 100
+                if diff > 15:
+                    flag = "🔴"
+                elif diff > 5:
+                    flag = "🟡"
+                else:
+                    flag = "✅"
+                km_line += f" | 📟 {odo_delta:.1f} км (одом.δ) | {flag} δ {diff:.1f}%"
             lines.append(
                 f"👤 {s['full_name']}\n"
                 f"{km_line}\n"
