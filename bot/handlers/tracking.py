@@ -52,6 +52,11 @@ async def _approved(user_id: int) -> bool:
     return bool(user and user["is_approved"])
 
 
+def _is_silent_driver(user_id: int) -> bool:
+    """Адміни, що їздять як водії, не надсилають повідомлення в груповий чат."""
+    return user_id in ADMIN_IDS or user_id in SUPER_ADMIN_IDS
+
+
 # ── Кнопки Reply Keyboard (дублюють команди) ─────────────────────────────────
 
 @router.message(F.text == "🚀 Почати маршрут")
@@ -111,13 +116,14 @@ async def cmd_start_route(message: Message, state: FSMContext):
         group_label = f"🚀 Водій {user['full_name']} розпочав маршрут #{route_id}"
         group_time_suffix = f"\n⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}"
 
-    try:
-        await message.bot.send_message(
-            GROUP_CHAT_ID,
-            f"{group_label}{group_time_suffix}",
-        )
-    except Exception as e:
-        logger.warning("Не вдалося надіслати старт в груповий чат: %s", e)
+    if not _is_silent_driver(user_id):
+        try:
+            await message.bot.send_message(
+                GROUP_CHAT_ID,
+                f"{group_label}{group_time_suffix}",
+            )
+        except Exception as e:
+            logger.warning("Не вдалося надіслати старт в груповий чат: %s", e)
 
     await state.update_data(start_route_id=route_id, start_is_adm=is_adm)
     await state.set_state(WaypointState.waiting_for_start_location)
@@ -202,11 +208,12 @@ async def handle_finish_location(message: Message, state: FSMContext):
             except Exception:
                 pass
 
-    try:
-        await message.bot.send_location(GROUP_CHAT_ID, latitude=lat, longitude=lon)
-        await message.bot.send_message(GROUP_CHAT_ID, f"🏁 {user_name} — Фініш")
-    except Exception as e:
-        logger.warning("Не вдалося надіслати фініш-геомітку в груповий чат: %s", e)
+    if not _is_silent_driver(message.from_user.id):
+        try:
+            await message.bot.send_location(GROUP_CHAT_ID, latitude=lat, longitude=lon)
+            await message.bot.send_message(GROUP_CHAT_ID, f"🏁 {user_name} — Фініш")
+        except Exception as e:
+            logger.warning("Не вдалося надіслати фініш-геомітку в груповий чат: %s", e)
 
     start_dt = datetime.fromisoformat(start_time) if start_time else datetime.now()
     delta = datetime.now() - start_dt
@@ -290,10 +297,11 @@ async def handle_finish_odometer(message: Message, state: FSMContext):
         except Exception as e:
             logger.warning("Не вдалося надіслати фініш адміну %s: %s", admin_id, e)
 
-    try:
-        await message.bot.send_message(GROUP_CHAT_ID, summary)
-    except Exception as e:
-        logger.warning("Не вдалося надіслати фініш в груповий чат: %s", e)
+    if not _is_silent_driver(message.from_user.id):
+        try:
+            await message.bot.send_message(GROUP_CHAT_ID, summary)
+        except Exception as e:
+            logger.warning("Не вдалося надіслати фініш в груповий чат: %s", e)
 
 
 # ── Геолокація ────────────────────────────────────────────────────────────────
@@ -315,11 +323,12 @@ async def handle_start_location(message: Message, state: FSMContext):
     await add_waypoint(route_id, lat, lon, "Старт", now, False)
 
     user = await get_user(message.from_user.id)
-    try:
-        await message.bot.send_location(GROUP_CHAT_ID, latitude=lat, longitude=lon)
-        await message.bot.send_message(GROUP_CHAT_ID, f"📍 {user['full_name']} — Старт")
-    except Exception as e:
-        logger.warning("Не вдалося надіслати старт-геомітку в груповий чат: %s", e)
+    if not _is_silent_driver(message.from_user.id):
+        try:
+            await message.bot.send_location(GROUP_CHAT_ID, latitude=lat, longitude=lon)
+            await message.bot.send_message(GROUP_CHAT_ID, f"📍 {user['full_name']} — Старт")
+        except Exception as e:
+            logger.warning("Не вдалося надіслати старт-геомітку в груповий чат: %s", e)
 
     # Переходимо до запиту одометра (зберігаємо route_id і is_adm)
     await state.update_data(start_route_id=route_id, start_is_adm=is_adm)
@@ -434,11 +443,12 @@ async def handle_waypoint_name(message: Message, state: FSMContext):
     if suspicious:
         caption += "\n⚠️ ПІДОЗРІЛА ГЕОМІТКА — можливий GPS-спуфінг!"
 
-    try:
-        await message.bot.send_location(GROUP_CHAT_ID, latitude=lat, longitude=lon)
-        await message.bot.send_message(GROUP_CHAT_ID, caption)
-    except Exception as e:
-        logger.warning("Не вдалося надіслати в груповий чат %s: %s", GROUP_CHAT_ID, e)
+    if not _is_silent_driver(user_id):
+        try:
+            await message.bot.send_location(GROUP_CHAT_ID, latitude=lat, longitude=lon)
+            await message.bot.send_message(GROUP_CHAT_ID, caption)
+        except Exception as e:
+            logger.warning("Не вдалося надіслати в груповий чат %s: %s", GROUP_CHAT_ID, e)
 
     # Сповістити адмінів про підозрілу мітку
     if suspicious:

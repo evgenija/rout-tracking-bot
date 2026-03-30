@@ -7,6 +7,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from bot.config import (
     ADMIN_IDS,
+    SUPER_ADMIN_IDS,
     DAILY_REPORT_HOUR,
     DAILY_REPORT_MINUTE,
     GROUP_CHAT_ID,
@@ -140,16 +141,17 @@ async def auto_close_active_routes(bot: Bot):
                 except Exception as e:
                     logger.warning("Не вдалося надіслати авто-закриття адміну %s: %s", admin_id, e)
 
-            # Повідомлення в загальний чат
-            try:
-                await bot.send_message(
-                    GROUP_CHAT_ID,
-                    f"⚠️ Маршрут {route['full_name']} закрито автоматично о 23:59\n"
-                    f"(водій не натиснув Фініш)\n"
-                    f"🛣 Пробіг за день: {total_km:.1f} км",
-                )
-            except Exception as e:
-                logger.warning("Не вдалося надіслати авто-закриття в груповий чат: %s", e)
+            # Повідомлення в загальний чат (тихий режим для адмінів-водіїв)
+            if route["telegram_id"] not in ADMIN_IDS and route["telegram_id"] not in SUPER_ADMIN_IDS:
+                try:
+                    await bot.send_message(
+                        GROUP_CHAT_ID,
+                        f"⚠️ Маршрут {route['full_name']} закрито автоматично о 23:59\n"
+                        f"(водій не натиснув Фініш)\n"
+                        f"🛣 Пробіг за день: {total_km:.1f} км",
+                    )
+                except Exception as e:
+                    logger.warning("Не вдалося надіслати авто-закриття в груповий чат: %s", e)
 
         except Exception as e:
             logger.error("Помилка авто-закриття маршруту #%s: %s", route_id, e)
