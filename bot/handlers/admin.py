@@ -640,6 +640,30 @@ async def cmd_fix_range(message: Message):
     await message.answer("\n".join(lines))
 
 
+@router.message(Command("check_odometer_31"))
+async def cmd_check_odometer_31(message: Message):
+    if message.from_user.id not in ADMIN_IDS and message.from_user.id not in SUPER_ADMIN_IDS:
+        return
+    import aiosqlite
+    from bot.config import DB_PATH
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT id, odometer_start, odometer_km, total_km FROM routes WHERE id = 31"
+        ) as cur:
+            row = await cur.fetchone()
+    if not row:
+        await message.answer("Маршрут #31 не знайдено.")
+        return
+    r = dict(row)
+    await message.answer(
+        f"🔍 Маршрут #31\n"
+        f"odometer_start: {r['odometer_start']}\n"
+        f"odometer_km:    {r['odometer_km']}\n"
+        f"total_km:       {r['total_km']}"
+    )
+
+
 @router.message(Command("cancel"))
 async def cmd_cancel(message: Message, state: FSMContext):
     current = await state.get_state()
