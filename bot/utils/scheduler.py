@@ -26,6 +26,29 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler(timezone="Europe/Kyiv")
 
 
+def _odo_accuracy_block(total_km: float, odo_start, odo_finish) -> str:
+    if odo_start is None or odo_finish is None:
+        return "📍 Одометр: не введено"
+    odo_diff = odo_finish - odo_start
+    if odo_diff <= 0:
+        return f"📍 Одометр: {odo_start:.0f} → {odo_finish:.0f} км\n   ⚠️ Помилка вводу"
+    diff_pct = abs(total_km - odo_diff) / odo_diff * 100
+    if diff_pct <= 10:
+        label = "✅ Норма"
+    elif diff_pct <= 25:
+        label = "⚠️ Місто/Waze (очікувано)"
+    elif diff_pct <= 40:
+        label = "🔶 Перевірити маршрут"
+    else:
+        label = "🔴 Критична розбіжність"
+    return (
+        f"📍 Одометр: {odo_start:.0f} → {odo_finish:.0f} км\n"
+        f"   Пробіг за одометром: {odo_diff:.1f} км\n"
+        f"   Трекінг: {total_km:.1f} км\n"
+        f"   Похибка: {diff_pct:.1f}%  {label}"
+    )
+
+
 async def send_daily_report(bot: Bot):
     today = datetime.now().date().isoformat()
     stats = await get_daily_stats(today)
@@ -36,22 +59,15 @@ async def send_daily_report(bot: Bot):
         lines = [f"📊 Щоденний звіт за {today}\n"]
         for s in stats:
             duration = format_duration(s["first_start"], s["last_end"])
-            km_line = f"   🛣 {s['total_km']:.1f} км (прогр.)"
-            odo_delta = s.get("total_odo_delta")
-            if odo_delta and odo_delta > 0:
-                diff = abs(s["total_km"] - odo_delta) / odo_delta * 100
-                if diff > 15:
-                    flag = "🔴"
-                elif diff > 5:
-                    flag = "🟡"
-                else:
-                    flag = "✅"
-                km_line += f" | 📟 {odo_delta:.1f} км (одом.δ) | {flag} δ {diff:.1f}%"
-            lines.append(
+            total_km = s["total_km"]
+            wcount   = s.get("waypoint_count", 0)
+            base = (
                 f"👤 {s['full_name']}\n"
-                f"{km_line}\n"
-                f"   ⏱ {duration}"
+                f"🛣 {total_km:.1f} км | {wcount} точок\n"
+                f"⏱ {duration}"
             )
+            odo_block = _odo_accuracy_block(total_km, s.get("odo_start"), s.get("odo_finish"))
+            lines.append(f"{base}\n{odo_block}")
         text = "\n\n".join(lines)
 
     for admin_id in ADMIN_IDS:

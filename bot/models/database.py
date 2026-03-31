@@ -361,7 +361,8 @@ async def get_daily_stats(date_str: str) -> List[Dict]:
             SELECT u.full_name,
                    u.telegram_id,
                    COALESCE(SUM(r.total_km), 0)        AS total_km,
-                   SUM(r.odometer_km - r.odometer_start) AS total_odo_delta,
+                   MIN(r.odometer_start)               AS odo_start,
+                   MAX(r.odometer_km)                  AS odo_finish,
                    MIN(r.start_time)                   AS first_start,
                    MAX(COALESCE(r.end_time, datetime('now'))) AS last_end,
                    COALESCE(wc.wcount, 0)              AS waypoint_count

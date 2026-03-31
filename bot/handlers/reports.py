@@ -49,6 +49,29 @@ async def cmd_drivers(message: Message):
     await message.answer("\n".join(lines))
 
 
+def _odo_accuracy_block(total_km: float, odo_start, odo_finish) -> str:
+    if odo_start is None or odo_finish is None:
+        return "📍 Одометр: не введено"
+    odo_diff = odo_finish - odo_start
+    if odo_diff <= 0:
+        return f"📍 Одометр: {odo_start:.0f} → {odo_finish:.0f} км\n   ⚠️ Помилка вводу"
+    diff_pct = abs(total_km - odo_diff) / odo_diff * 100
+    if diff_pct <= 10:
+        label = "✅ Норма"
+    elif diff_pct <= 25:
+        label = "⚠️ Місто/Waze (очікувано)"
+    elif diff_pct <= 40:
+        label = "🔶 Перевірити маршрут"
+    else:
+        label = "🔴 Критична розбіжність"
+    return (
+        f"📍 Одометр: {odo_start:.0f} → {odo_finish:.0f} км\n"
+        f"   Пробіг за одометром: {odo_diff:.1f} км\n"
+        f"   Трекінг: {total_km:.1f} км\n"
+        f"   Похибка: {diff_pct:.1f}%  {label}"
+    )
+
+
 @router.message(Command("report"))
 async def cmd_report(message: Message):
     if not is_admin(message.from_user.id):
@@ -65,10 +88,14 @@ async def cmd_report(message: Message):
     lines = [f"📊 Щоденний звіт за {today}\n"]
     for s in stats:
         duration = format_duration(s["first_start"], s["last_end"])
+        odo_block = _odo_accuracy_block(
+            s["total_km"], s.get("odo_start"), s.get("odo_finish")
+        )
         lines.append(
             f"👤 {s['full_name']}\n"
-            f"   🛣 {s['total_km']:.1f} км | {s['waypoint_count']} точок\n"
-            f"   ⏱ {duration}"
+            f"🛣 {s['total_km']:.1f} км | {s['waypoint_count']} точок\n"
+            f"⏱ {duration}\n"
+            f"{odo_block}"
         )
     await message.answer("\n\n".join(lines))
 
