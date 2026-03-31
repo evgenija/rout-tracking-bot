@@ -195,7 +195,6 @@ async def is_suspicious(
 
     Рівень 3 — геозони (нові):
       • Перевірка A: точка поза межами України (lat 44.3–52.4, lon 22.1–40.2)
-      • Перевірка Б: точка поза робочими областями Київ/Житомир (буфер ±0.5°)
       При спрацюванні геозони — надсилає сповіщення адмінам через bot (якщо передано).
     """
     distance = haversine(lat1, lon1, lat2, lon2)
@@ -239,18 +238,6 @@ async def is_suspicious(
     if not (44.3 <= lat2 <= 52.4 and 22.1 <= lon2 <= 40.2):
         await _notify(
             f"⚠️ GPS-аномалія: точка водія {driver_name} поза межами України\n"
-            f"lat={lat2}, lon={lon2}\n"
-            f"Маршрут #{route_id}"
-        )
-        return True
-
-    # Перевірка Б — поза робочими областями (Київська / Житомирська + буфер ±0.5°)
-    BUF = 0.5
-    in_kyiv = (49.5 - BUF <= lat2 <= 51.0 + BUF) and (29.5 - BUF <= lon2 <= 32.0 + BUF)
-    in_zhyt = (49.5 - BUF <= lat2 <= 51.5 + BUF) and (27.5 - BUF <= lon2 <= 30.5 + BUF)
-    if not (in_kyiv or in_zhyt):
-        await _notify(
-            f"⚠️ GPS-аномалія: точка водія {driver_name} поза робочими областями\n"
             f"lat={lat2}, lon={lon2}\n"
             f"Маршрут #{route_id}"
         )
