@@ -475,21 +475,25 @@ async def handle_waypoint_name(message: Message, state: FSMContext):
 
     now = datetime.now().isoformat()
 
+    user = await get_user(user_id)
+
     # РЕБ-спуфінг перевірка — порівнюємо з останньою валідною точкою
     last_wp = await get_last_valid_waypoint(route_id)
     if last_wp is None:
         last_wp = await get_last_waypoint(route_id)  # fallback: всі попередні підозрілі
     suspicious = False
     if last_wp:
-        suspicious = check_suspicious(
+        suspicious = await check_suspicious(
             last_wp["lat"], last_wp["lon"], last_wp["timestamp"],
             lat, lon, now,
             MAX_DISTANCE_KM, MIN_TIME_MINUTES,
+            bot=message.bot,
+            driver_name=user["full_name"],
+            route_id=route_id,
+            admin_ids=list(set(ADMIN_IDS + SUPER_ADMIN_IDS)),
         )
 
     await add_waypoint(route_id, lat, lon, point_name, now, suspicious)
-
-    user = await get_user(user_id)
     flag = "⚠️" if suspicious else "📍"
 
     # Коротке підтвердження водію без деталей

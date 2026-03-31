@@ -172,20 +172,31 @@ def get_api_call_count() -> int:
 
 # ── GPS spoofing detection ────────────────────────────────────────────────────
 
-def is_suspicious(
+async def is_suspicious(
     lat1: float, lon1: float, time1: str,
     lat2: float, lon2: float, time2: str,
-    max_distance_km: float = 500.0,
+    max_distance_km: float = 130.0,
     min_time_minutes: float = 2.0,
+    *,
+    bot=None,
+    driver_name: str = "невідомий",
+    route_id: int | None = None,
+    admin_ids: list | None = None,
 ) -> bool:
-    """Повертає True, якщо переміщення підозріло (можливий GPS-спуфінг / РЕБ).
+    """Повертає True, якщо точка підозріла (GPS-спуфінг / РЕБ / поза геозоною).
 
-    Перевіряє два критерії:
-    1. Миттєва телепортація — відстань > max_distance_km (за замовчуванням 100 км).
-    2. Неможлива швидкість — > 200 км/год між двома мітками.
+    Рівень 1 — швидкісні перевірки (існуючі):
+      • Телепортація: відстань > max_distance_km (130 км) за < min_time_minutes
+      • Неможлива швидкість: > 160 км/год між мітками
+      • Комбінована: dist > 35 км І speed > 150 км/год одночасно
 
-    Раніше функція повертала False для БУДЬ-ЯКОЇ відстані ≤ 500 км,
-    тобто ніколи не спрацьовувала для України. Виправлено.
+    Рівень 2 — абсолютний поріг:
+      • Відстань > max_distance_km (130 км) за будь-який час
+
+    Рівень 3 — геозони (нові):
+      • Перевірка A: точка поза межами України (lat 44.3–52.4, lon 22.1–40.2)
+      • Перевірка Б: точка поза робочими областями Київ/Житомир (буфер ±0.5°)
+      При спрацюванні геозони — надсилає сповіщення адмінам через bot (якщо передано).
     """
     distance = haversine(lat1, lon1, lat2, lon2)
 
@@ -193,13 +204,59 @@ def is_suspicious(
     t2 = datetime.fromisoformat(time2)
     elapsed_minutes = abs((t2 - t1).total_seconds() / 60)
 
-    # Замало часу — тільки перевірка відстані (телепортація)
+    # ── Рівень 1: швидкісні перевірки ────────────────────────────────────────
     if elapsed_minutes < min_time_minutes:
-        return distance > max_distance_km
+        # Телепортація: замало часу → перевіряємо тільки відстань
+        if distance > max_distance_km:
+            return True
+    else:
+        speed_kmh = distance / (elapsed_minutes / 60)
 
-    # Достатньо часу — тільки перевірка швидкості
-    speed_kmh = distance / (elapsed_minutes / 60)
-    return speed_kmh > 160.0
+        # Неможлива швидкість
+        if speed_kmh > 160.0:
+            return True
+
+        # Комбінована: велика відстань + висока швидкість одночасно
+        # (dist > 35 але speed < 150 → нормальна довга пауза між точками)
+        if distance > 35.0 and speed_kmh > 150.0:
+            return True
+
+    # ── Рівень 2: абсолютний поріг відстані ──────────────────────────────────
+    if distance > max_distance_km:
+        return True
+
+    # ── Рівень 3: геозони ─────────────────────────────────────────────────────
+
+    async def _notify(text: str) -> None:
+        if bot and admin_ids:
+            for aid in admin_ids:
+                try:
+                    await bot.send_message(aid, text)
+                except Exception as exc:
+                    logger.warning("Не вдалося надіслати сповіщення адміну %d: %s", aid, exc)
+
+    # Перевірка A — поза межами України
+    if not (44.3 <= lat2 <= 52.4 and 22.1 <= lon2 <= 40.2):
+        await _notify(
+            f"⚠️ GPS-аномалія: точка водія {driver_name} поза межами України\n"
+            f"lat={lat2}, lon={lon2}\n"
+            f"Маршрут #{route_id}"
+        )
+        return True
+
+    # Перевірка Б — поза робочими областями (Київська / Житомирська + буфер ±0.5°)
+    BUF = 0.5
+    in_kyiv = (49.5 - BUF <= lat2 <= 51.0 + BUF) and (29.5 - BUF <= lon2 <= 32.0 + BUF)
+    in_zhyt = (49.5 - BUF <= lat2 <= 51.5 + BUF) and (27.5 - BUF <= lon2 <= 30.5 + BUF)
+    if not (in_kyiv or in_zhyt):
+        await _notify(
+            f"⚠️ GPS-аномалія: точка водія {driver_name} поза робочими областями\n"
+            f"lat={lat2}, lon={lon2}\n"
+            f"Маршрут #{route_id}"
+        )
+        return True
+
+    return False
 
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
