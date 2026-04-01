@@ -6,7 +6,8 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from bot.config import BOT_NAME, BOT_TOKEN
+from aiogram.types import BotCommand, BotCommandScopeChat
+from bot.config import BOT_NAME, BOT_TOKEN, ADMIN_IDS, SUPER_ADMIN_IDS
 from bot.handlers import admin, auth, reports, tracking
 from bot.models.database import (
     init_db,
@@ -49,6 +50,15 @@ async def main():
     dp.include_router(reports.router)
 
     setup_scheduler(bot)
+
+    admin_commands = [
+        BotCommand(command="remind_ios", description="Нагадування водію про геолокацію iOS"),
+    ]
+    for admin_id in set(ADMIN_IDS + SUPER_ADMIN_IDS):
+        try:
+            await bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=admin_id))
+        except Exception:
+            pass
 
     logger.info("Бот запущено. Починаю polling...")
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
