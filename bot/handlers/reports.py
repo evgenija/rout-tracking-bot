@@ -2,6 +2,8 @@ from datetime import datetime, timedelta
 
 import logging
 
+from bot.utils.time_utils import get_kyiv_time
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -78,7 +80,7 @@ async def cmd_report(message: Message):
         await message.answer("❌ Недостатньо прав.")
         return
 
-    today = datetime.now().date().isoformat()
+    today = get_kyiv_time().date().isoformat()
     stats = await get_daily_stats(today)
 
     if not stats:
@@ -106,7 +108,7 @@ async def cmd_weekly(message: Message):
         await message.answer("❌ Недостатньо прав.")
         return
 
-    today           = datetime.now().date()
+    today           = get_kyiv_time().date()
     week_start_date = today - timedelta(days=today.weekday())
     week_start      = week_start_date.isoformat()
     week_end        = today.isoformat()

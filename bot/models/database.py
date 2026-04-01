@@ -2,6 +2,7 @@ import aiosqlite
 from datetime import datetime
 from typing import Optional, List, Dict
 from bot.config import DB_PATH
+from bot.utils.time_utils import get_kyiv_time
 
 
 async def init_db():
@@ -222,7 +223,7 @@ async def get_todays_route(driver_id: int) -> Optional[Dict]:
     чи водій вже натиснув Фініш і ще не натиснув новий Старт.
     Активний маршрут (is_active=1) має пріоритет над завершеним.
     """
-    today = datetime.now().date().isoformat()
+    today = get_kyiv_time().date().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
@@ -239,7 +240,7 @@ async def get_todays_route(driver_id: int) -> Optional[Dict]:
 
 async def get_todays_finished_route(driver_id: int) -> Optional[Dict]:
     """Повертає останній завершений маршрут водія за сьогодні (is_active=0)."""
-    today = datetime.now().date().isoformat()
+    today = get_kyiv_time().date().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
@@ -253,7 +254,7 @@ async def get_todays_finished_route(driver_id: int) -> Optional[Dict]:
 
 async def get_all_active_routes_today() -> List[Dict]:
     """Всі активні маршрути за сьогодні з даними водія."""
-    today = datetime.now().date().isoformat()
+    today = get_kyiv_time().date().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(

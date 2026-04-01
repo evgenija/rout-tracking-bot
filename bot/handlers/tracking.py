@@ -2,6 +2,7 @@ import logging
 from datetime import datetime
 
 from aiogram import Router, F
+from bot.utils.time_utils import get_kyiv_time, to_kyiv_time
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -158,9 +159,9 @@ async def cmd_start_route(message: Message, state: FSMContext):
         # Продовжуємо завершений маршрут за сьогодні
         await reactivate_route(todays_route["id"])
         route_id = todays_route["id"]
-        now_dt = datetime.now()
+        now_dt = get_kyiv_time()
         finish_dt = (
-            datetime.fromisoformat(todays_route["end_time"])
+            to_kyiv_time(datetime.fromisoformat(todays_route["end_time"]))
             if todays_route.get("end_time")
             else now_dt
         )
@@ -182,7 +183,7 @@ async def cmd_start_route(message: Message, state: FSMContext):
         route_id = await start_route(user_id, now)
         label = f"🚀 Маршрут #{route_id} розпочато!"
         group_label = f"🚀 Водій {user['full_name']} розпочав маршрут #{route_id}"
-        group_time_suffix = f"\n⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}"
+        group_time_suffix = f"\n⏰ {get_kyiv_time().strftime('%H:%M %d.%m.%Y')}"
 
     if not _is_silent_driver(user_id):
         try:
@@ -197,7 +198,7 @@ async def cmd_start_route(message: Message, state: FSMContext):
     await state.set_state(WaypointState.waiting_for_start_location)
     await message.answer(
         f"{label}\n"
-        f"⏰ {datetime.now().strftime('%H:%M %d.%m.%Y')}\n\n"
+        f"⏰ {get_kyiv_time().strftime('%H:%M %d.%m.%Y')}\n\n"
         "📍 Надішли своє місцезнаходження для фіксації старту маршруту.",
         reply_markup=kb_admin_driver_active() if is_adm else kb_driver_active(),
     )
@@ -289,11 +290,15 @@ async def handle_finish_location(message: Message, state: FSMContext):
     hours, rem = divmod(int(delta.total_seconds()), 3600)
     minutes = rem // 60
 
+    _now_kyiv = get_kyiv_time()
+    _start_hm = to_kyiv_time(start_dt).strftime('%H:%M') if start_time else _now_kyiv.strftime('%H:%M')
     await state.update_data(
         finish_total_km=total_km,
         finish_waypoint_count=len(waypoints),
         finish_duration=f"{hours}г {minutes}хв",
-        finish_time=datetime.now().strftime('%H:%M %d.%m.%Y'),
+        finish_start_hm=_start_hm,
+        finish_hm=_now_kyiv.strftime('%H:%M'),
+        finish_date=_now_kyiv.strftime('%d.%m.%Y'),
         finish_end_time=now,
     )
     await state.set_state(OdometerState.waiting_for_finish_odometer)
@@ -314,7 +319,9 @@ async def handle_finish_odometer(message: Message, state: FSMContext):
     user_name     = data["finish_user_name"]
     wp_count      = data["finish_waypoint_count"]
     duration      = data["finish_duration"]
-    time_str      = data["finish_time"]
+    start_hm      = data["finish_start_hm"]
+    finish_hm     = data["finish_hm"]
+    finish_date   = data["finish_date"]
     end_time      = data.get("finish_end_time", datetime.now().isoformat())
     is_adm        = data["finish_is_adm"]
     odometer_start = data.get("finish_odometer_start")
@@ -354,7 +361,7 @@ async def handle_finish_odometer(message: Message, state: FSMContext):
                 }
                 _diag_text = (
                     f"🔴 Критична розбіжність — маршрут #{route_id}\n"
-                    f"👤 {user_name} | {datetime.now().strftime('%d.%m.%Y')}\n\n"
+                    f"👤 {user_name} | {get_kyiv_time().strftime('%d.%m.%Y')}\n\n"
                     f"📊 Трекінг:  {total_km:.2f} км\n"
                     f"📌 Одометр: {_odo_diff:.1f} км\n"
                     f"⚠️ Похибка:  {_pct:.1f}%\n\n"
@@ -379,7 +386,7 @@ async def handle_finish_odometer(message: Message, state: FSMContext):
         f"👤 {user_name}\n"
         f"📍 Точок: {wp_count}\n"
         f"⏱ Тривалість: {duration}\n"
-        f"⏰ {time_str}\n\n"
+        f"🕐 {start_hm} → {finish_hm}  {finish_date}\n\n"
         f"{odo_section}"
     )
 

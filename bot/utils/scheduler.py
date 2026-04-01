@@ -1,6 +1,8 @@
 import logging
 from datetime import datetime, timedelta
 
+from bot.utils.time_utils import get_kyiv_time
+
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -50,7 +52,7 @@ def _odo_accuracy_block(total_km: float, odo_start, odo_finish) -> str:
 
 
 async def send_daily_report(bot: Bot):
-    today = datetime.now().date().isoformat()
+    today = get_kyiv_time().date().isoformat()
     stats = await get_daily_stats(today)
 
     if not stats:
@@ -78,7 +80,7 @@ async def send_daily_report(bot: Bot):
 
 
 async def send_weekly_report(bot: Bot):
-    today = datetime.now().date()
+    today = get_kyiv_time().date()
     # Тиждень: з попереднього понеділка по сьогодні
     week_start = (today - timedelta(days=today.weekday() + 1)).isoformat()
     week_end = today.isoformat()
