@@ -126,11 +126,6 @@ def kb_remind_ios_drivers(drivers: list) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def kb_ios_location_settings() -> InlineKeyboardMarkup:
-    """Кнопка відкриття налаштувань геолокації iOS — надсилається водію."""
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="⚙️ Відкрити налаштування геолокації",
-            url="App-prefs:Privacy&path=LOCATION",
-        )
-    ]])
+def kb_ios_location_settings() -> None:
+    """App-prefs:// URL не підтримується Telegram Bot API — кнопка не додається."""
+    return None
