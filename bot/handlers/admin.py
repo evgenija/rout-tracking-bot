@@ -17,6 +17,8 @@ from bot.models.database import (
     get_weekly_stats_by_day,
     get_route_info,
     get_route_waypoints,
+    get_route_correction_state,
+    set_route_correction,
     get_routes_in_date_range,
     set_manual_km,
     clear_manual_km,
@@ -25,7 +27,7 @@ from bot.models.database import (
     recalculate_all_route_distances,
     search_drivers_by_query,
 )
-from bot.utils.geo import format_duration, haversine
+from bot.utils.geo import format_duration, haversine, get_road_distance_for_route
 from bot.utils.keyboards import kb_admin_main, kb_admin_driver_idle, kb_drivers_menu, kb_reports_menu
 
 logger = logging.getLogger(__name__)
@@ -699,3 +701,76 @@ async def cmd_cancel(message: Message, state: FSMContext):
     if current and "RemoveDriverState" in current:
         await state.clear()
         await message.answer("❌ Скасовано.", reply_markup=kb_admin_main())
+
+
+# ── Inline callbacks: корекція маршруту (правило 2.4) ─────────────────────────
+
+_CORRECTION_LABELS = {
+    "odometer":              "прийнятий одометр",
+    "recalculated":          "перераховано без підозрілих",
+    "pending_clarification": "очікує уточнення",
+}
+
+
+@router.callback_query(F.data.startswith("corr:"))
+async def cb_route_correction(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Недостатньо прав.", show_alert=True)
+        return
+
+    parts = callback.data.split(":")
+    # corr:odo:{route_id}:{odometer_diff}  → parts[1]='odo', parts[2]=route_id, parts[3]=odometer_diff
+    # corr:recalc:{route_id}               → parts[1]='recalc', parts[2]=route_id
+    # corr:clarify:{route_id}              → parts[1]='clarify', parts[2]=route_id
+    action   = parts[1]
+    route_id = int(parts[2])
+
+    # Ідемпотентність: якщо вже скориговано — лише сповіщаємо, не змінюємо
+    corr_state = await get_route_correction_state(route_id)
+    if corr_state and corr_state.get("correction_type"):
+        label = _CORRECTION_LABELS.get(corr_state["correction_type"], corr_state["correction_type"])
+        await callback.answer(f"⚠️ Маршрут вже скориговано: {label}", show_alert=True)
+        return
+
+    admin_id   = callback.from_user.id
+    admin_name = callback.from_user.full_name or str(admin_id)
+
+    if action == "odo":
+        odometer_diff = float(parts[3])
+        await set_route_correction(route_id, "odometer", admin_id, total_km=odometer_diff)
+        await callback.answer("✅ Одометр прийнято")
+        await callback.message.edit_text(
+            callback.message.text
+            + f"\n\n✅ Скориговано: одометр ({odometer_diff:.1f} км)"
+            + f"\nАдмін: {admin_name}",
+            reply_markup=None,
+        )
+        logger.info("corr:odo route=%d km=%.2f by=%d", route_id, odometer_diff, admin_id)
+
+    elif action == "recalc":
+        waypoints = await get_route_waypoints(route_id)
+        new_km = await get_road_distance_for_route(waypoints)
+        await set_route_correction(route_id, "recalculated", admin_id, total_km=new_km)
+        await callback.answer("🔄 Перераховано")
+        await callback.message.edit_text(
+            callback.message.text
+            + f"\n\n🔄 Скориговано: перерахунок без підозрілих ({new_km:.1f} км)"
+            + f"\nАдмін: {admin_name}",
+            reply_markup=None,
+        )
+        logger.info("corr:recalc route=%d new_km=%.2f by=%d", route_id, new_km, admin_id)
+
+    elif action == "clarify":
+        await set_route_correction(route_id, "pending_clarification", admin_id)
+        await callback.answer("❓ Позначено для уточнення")
+        await callback.message.edit_text(
+            callback.message.text
+            + f"\n\n❓ Очікує уточнення у водія"
+            + f"\nАдмін: {admin_name}",
+            reply_markup=None,
+        )
+        logger.info("corr:clarify route=%d by=%d", route_id, admin_id)
+
+    else:
+        await callback.answer("Невідома дія.", show_alert=True)
+        logger.warning("corr: невідомий action=%s route=%d", action, route_id)

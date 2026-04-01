@@ -60,6 +60,27 @@ async def init_db():
             )
         except Exception:
             pass  # колонка вже існує
+        # Міграція: correction_type — тип корекції кілометражу адміном
+        try:
+            await db.execute(
+                "ALTER TABLE routes ADD COLUMN correction_type TEXT DEFAULT NULL"
+            )
+        except Exception:
+            pass  # колонка вже існує
+        # Міграція: corrected_by — telegram_id адміна що вніс корекцію
+        try:
+            await db.execute(
+                "ALTER TABLE routes ADD COLUMN corrected_by INTEGER DEFAULT NULL"
+            )
+        except Exception:
+            pass  # колонка вже існує
+        # Міграція: corrected_at — час корекції (ISO timestamp)
+        try:
+            await db.execute(
+                "ALTER TABLE routes ADD COLUMN corrected_at TEXT DEFAULT NULL"
+            )
+        except Exception:
+            pass  # колонка вже існує
         await db.commit()
 
 
@@ -279,6 +300,48 @@ async def get_route_info(route_id: int) -> Optional[Dict]:
             return dict(row) if row else None
 
 
+async def get_route_correction_state(route_id: int) -> Optional[Dict]:
+    """Повертає correction_type і total_km маршруту (для перевірки ідемпотентності)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT id, total_km, correction_type, corrected_by, corrected_at FROM routes WHERE id = ?",
+            (route_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def set_route_correction(
+    route_id: int,
+    correction_type: str,
+    corrected_by: int,
+    total_km: float | None = None,
+) -> None:
+    """Записує результат корекції кілометражу адміном (правило 2.4).
+
+    total_km оновлюється тільки якщо передано (не None).
+    correction_type: 'odometer' | 'recalculated' | 'pending_clarification'
+    """
+    now = datetime.now().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        if total_km is not None:
+            await db.execute(
+                """UPDATE routes
+                      SET total_km = ?, correction_type = ?, corrected_by = ?, corrected_at = ?
+                    WHERE id = ?""",
+                (total_km, correction_type, corrected_by, now, route_id),
+            )
+        else:
+            await db.execute(
+                """UPDATE routes
+                      SET correction_type = ?, corrected_by = ?, corrected_at = ?
+                    WHERE id = ?""",
+                (correction_type, corrected_by, now, route_id),
+            )
+        await db.commit()
+
+
 async def set_manual_km(route_id: int, km: float) -> bool:
     """Встановлює кілометраж вручну і позначає маршрут як is_manual=1.
     Повертає True якщо маршрут знайдено і оновлено, False якщо не знайдено."""
@@ -349,6 +412,27 @@ async def get_last_valid_waypoint(route_id: int) -> Optional[Dict]:
         ) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
+
+
+async def get_last_n_waypoints(route_id: int, n: int) -> List[Dict]:
+    """Останні N точок маршруту, відсортовані від найстарішої до найновішої."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM waypoints WHERE route_id = ? ORDER BY timestamp DESC LIMIT ?",
+            (route_id, n),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in reversed(rows)]
+
+
+async def mark_waypoint_suspicious(waypoint_id: int) -> None:
+    """Позначає точку як підозрілу (GPS spike, ретроспективно)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE waypoints SET is_suspicious = 1 WHERE id = ?", (waypoint_id,)
+        )
+        await db.commit()
 
 
 # ── Reports ───────────────────────────────────────────────────────────────────

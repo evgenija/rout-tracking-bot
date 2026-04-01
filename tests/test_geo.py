@@ -9,7 +9,7 @@ import math
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from bot.utils.geo import haversine, calculate_route_distance, is_suspicious, get_road_distance_for_route
+from bot.utils.geo import haversine, calculate_route_distance, is_suspicious, is_spike, get_road_distance_for_route
 
 
 # ── haversine ─────────────────────────────────────────────────────────────────
@@ -116,40 +116,74 @@ def test_route_sums_all_pairs():
 
 def test_suspicious_teleport():
     """Стрибок > 100 км — підозріло (незалежно від часу)."""
-    assert is_suspicious(
+    assert asyncio.run(is_suspicious(
         50.4501, 30.5234, "2026-03-24T08:00:00",
         48.0000, 37.0000, "2026-03-24T09:00:00",  # ~700 км — Київ → Донецьк
         max_distance_km=100.0,
-    )
+    ))
 
 
 def test_suspicious_impossible_speed():
     """50 км за 10 хвилин = 300 км/год → підозріло."""
-    assert is_suspicious(
+    assert asyncio.run(is_suspicious(
         50.4501, 30.5234, "2026-03-24T08:00:00",
         50.8500, 31.0000, "2026-03-24T08:10:00",  # ~60 км
         max_distance_km=100.0,
         min_time_minutes=2.0,
-    )
+    ))
 
 
 def test_not_suspicious_normal_delivery():
     """Нормальна доставка: 5 км за 20 хвилин = 15 км/год → не підозріло."""
-    assert not is_suspicious(
+    assert not asyncio.run(is_suspicious(
         50.4501, 30.5234, "2026-03-24T08:00:00",
         50.4800, 30.5600, "2026-03-24T08:20:00",  # ~4 км
         max_distance_km=100.0,
         min_time_minutes=2.0,
-    )
+    ))
 
 
 def test_not_suspicious_fast_but_possible():
     """30 км за 30 хвилин = 60 км/год → не підозріло."""
-    assert not is_suspicious(
+    assert not asyncio.run(is_suspicious(
         50.4501, 30.5234, "2026-03-24T08:00:00",
         50.7000, 30.7500, "2026-03-24T08:30:00",  # ~34 км
         max_distance_km=100.0,
         min_time_minutes=2.0,
+    ))
+
+
+# ── is_spike ──────────────────────────────────────────────────────────────────
+
+def test_spike_detected():
+    """A=Київ, B=~35 км на північ (spike), C=1 крок від B → B є spike.
+
+    dist(A,B) ≈ 35 км > 20 км ✓
+    dist(B,C) ≈ 0.12 км < 35*0.3=10.5 км ✓  (C ледве рухнулась від точки-спайку)
+    """
+    assert is_spike(
+        50.4501, 30.5234,   # A: Київ
+        50.7000, 30.8500,   # B: ~35 км spike
+        50.7010, 30.8510,   # C: ~0.12 км від B
+    )
+
+
+def test_spike_not_detected_small_jump():
+    """Стрибок A→B лише 5 км — не спайк."""
+    assert not is_spike(
+        50.4501, 30.5234,
+        50.4900, 30.5700,   # B: ~5 км від A (< 20 км порогу)
+        50.4510, 30.5240,
+    )
+
+
+def test_spike_not_detected_no_return():
+    """A→B великий, B→C теж великий (продовження руху) — не спайк."""
+    # Маршрут Київ → Харків → Дніпро: жодного повернення
+    assert not is_spike(
+        50.4501, 30.5234,   # A: Київ
+        49.9935, 36.2304,   # B: Харків (~430 км)
+        48.4647, 35.0462,   # C: Дніпро (~170 км від Харкова, але dist(B,C)/dist(A,B) ~0.4 > 0.3)
     )
 
 

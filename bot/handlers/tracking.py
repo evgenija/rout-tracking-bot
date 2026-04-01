@@ -14,19 +14,24 @@ from bot.models.database import (
     add_waypoint,
     end_route,
     get_active_route,
+    get_last_n_waypoints,
     get_last_waypoint,
     get_last_valid_waypoint,
     get_route_waypoints,
     get_todays_finished_route,
     get_todays_route,
     get_user,
+    mark_waypoint_suspicious,
     reactivate_route,
     save_odometer,
     save_odometer_start,
     start_route,
 )
+from bot.services.diagnostics import diagnose_route
 from bot.utils.geo import get_road_distance_for_route
+from bot.utils.geo import is_spike
 from bot.utils.geo import is_suspicious as check_suspicious
+from bot.utils.keyboards import kb_route_correction
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -332,6 +337,38 @@ async def handle_finish_odometer(message: Message, state: FSMContext):
         return  # стан залишається waiting_for_finish_odometer
 
     await state.clear()
+
+    # Правило 2.4 — діагностика критичної розбіжності
+    # Тригер: ручне закриття + обидва одометри є + трекінг > одометра + похибка > 40%
+    # total_km НЕ замінюється автоматично — тільки через кнопку адміна (Крок 4)
+    if odometer_start is not None and odometer_km is not None:
+        _odo_diff = odometer_km - odometer_start
+        if _odo_diff > 0 and total_km > _odo_diff:
+            _pct = (total_km - _odo_diff) / _odo_diff * 100
+            if _pct > 40.0:
+                _diag = await diagnose_route(route_id)
+                _labels = {
+                    "reb":     "РЕБ-спуфінг (ймовірний)",
+                    "ios":     "iOS фоновий режим (ймовірний)",
+                    "unknown": "Причина не визначена",
+                }
+                _diag_text = (
+                    f"🔴 Критична розбіжність — маршрут #{route_id}\n"
+                    f"👤 {user_name} | {datetime.now().strftime('%d.%m.%Y')}\n\n"
+                    f"📊 Трекінг:  {total_km:.2f} км\n"
+                    f"📌 Одометр: {_odo_diff:.1f} км\n"
+                    f"⚠️ Похибка:  {_pct:.1f}%\n\n"
+                    f"🔍 Діагноз: {_labels.get(_diag['diagnosis'], 'Причина не визначена')}\n"
+                    + "\n".join(_diag["indicators"])
+                    + "\n\nЩо робити:"
+                )
+                _kb = kb_route_correction(route_id, _odo_diff)
+                for _admin_id in list(set(ADMIN_IDS + SUPER_ADMIN_IDS)):
+                    try:
+                        await message.bot.send_message(_admin_id, _diag_text, reply_markup=_kb)
+                    except Exception as exc:
+                        logger.warning("Не вдалося надіслати діагностику адміну %d: %s", _admin_id, exc)
+
     await end_route(route_id, end_time, total_km)
     await save_odometer(route_id, odometer_km)
 
@@ -494,6 +531,20 @@ async def handle_waypoint_name(message: Message, state: FSMContext):
         )
 
     await add_waypoint(route_id, lat, lon, point_name, now, suspicious)
+
+    # GPS spike (правило 1.6): ретроспективно перевіряємо попередню точку B
+    # Логіка: щойно збережена точка = C; якщо dist(A,B)>20 і dist(B,C)<dist(A,B)*0.3 → B spike
+    last3 = await get_last_n_waypoints(route_id, 3)
+    if len(last3) == 3:
+        wp_a, wp_b, wp_c = last3
+        if not wp_b["is_suspicious"] and is_spike(
+            wp_a["lat"], wp_a["lon"],
+            wp_b["lat"], wp_b["lon"],
+            wp_c["lat"], wp_c["lon"],
+        ):
+            await mark_waypoint_suspicious(wp_b["id"])
+            logger.info("GPS spike: waypoint id=%d (route=%d) позначено як suspicious", wp_b["id"], route_id)
+
     flag = "⚠️" if suspicious else "📍"
 
     # Коротке підтвердження водію без деталей

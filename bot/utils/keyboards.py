@@ -82,5 +82,29 @@ def kb_drivers_menu() -> InlineKeyboardMarkup:
     ])
 
 
+def kb_route_correction(route_id: int, odometer_diff: float | None) -> InlineKeyboardMarkup:
+    """Кнопки дій адміна при критичній розбіжності кілометражу (правило 2.4).
+
+    Якщо odometer_diff передано — показує кнопку "Прийняти одометр".
+    Кнопки "Перерахувати" і "Уточнити" — завжди.
+    Callback prefix: corr:{action}:{route_id}
+    """
+    buttons = []
+    if odometer_diff is not None:
+        buttons.append([InlineKeyboardButton(
+            text=f"✅ Прийняти одометр ({odometer_diff:.1f} км)",
+            callback_data=f"corr:odo:{route_id}:{odometer_diff:.2f}",
+        )])
+    buttons.append([InlineKeyboardButton(
+        text="🔄 Перерахувати без підозрілих",
+        callback_data=f"corr:recalc:{route_id}",
+    )])
+    buttons.append([InlineKeyboardButton(
+        text="❓ Уточнити у водія",
+        callback_data=f"corr:clarify:{route_id}",
+    )])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def kb_remove() -> ReplyKeyboardRemove:
     return ReplyKeyboardRemove()
