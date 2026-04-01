@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timedelta
 
 from aiogram import Router, F
+from bot.utils.time_utils import get_kyiv_time
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -28,7 +29,10 @@ from bot.models.database import (
     search_drivers_by_query,
 )
 from bot.utils.geo import format_duration, haversine, get_road_distance_for_route
-from bot.utils.keyboards import kb_admin_main, kb_admin_driver_idle, kb_drivers_menu, kb_reports_menu
+from bot.utils.keyboards import (
+    kb_admin_main, kb_admin_driver_idle, kb_drivers_menu, kb_reports_menu,
+    kb_remind_ios_drivers, kb_ios_location_settings,
+)
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -91,7 +95,7 @@ async def cb_daily(callback: CallbackQuery):
         return
     await callback.answer()
 
-    today = datetime.now().date().isoformat()
+    today = get_kyiv_time().date().isoformat()
     stats = await get_daily_stats(today)
 
     if not stats:
@@ -116,7 +120,7 @@ async def cb_weekly(callback: CallbackQuery):
         return
     await callback.answer()
 
-    today           = datetime.now().date()
+    today           = get_kyiv_time().date()
     week_start_date = today - timedelta(days=today.weekday())
     week_start      = week_start_date.isoformat()
     week_end        = today.isoformat()
@@ -345,7 +349,7 @@ async def cmd_recalculate_today(message: Message):
         await message.answer("❌ Недостатньо прав.")
         return
 
-    today = datetime.now().date().isoformat()
+    today = get_kyiv_time().date().isoformat()
     await message.answer(f"🔄 Перераховую маршрути за {today} через Google API...")
 
     result = await recalculate_all_route_distances(today)
@@ -774,3 +778,82 @@ async def cb_route_correction(callback: CallbackQuery):
     else:
         await callback.answer("Невідома дія.", show_alert=True)
         logger.warning("corr: невідомий action=%s route=%d", action, route_id)
+
+
+# ── /remind_ios — нагадування водію про налаштування iOS геолокації ───────────
+
+_IOS_REMINDER_TEXT = (
+    "📍 Налаштування геолокації для точного трекінгу\n\n"
+    "Щоб маршрут записувався без пропусків, потрібно дозволити Telegram "
+    "використовувати геолокацію постійно.\n\n"
+    "Як налаштувати на iPhone:\n"
+    "1. Відкрий «Налаштування» iPhone\n"
+    "2. Прокрути вниз → знайди Telegram\n"
+    "3. Натисни «Геолокація» → обери «Завжди»\n"
+    "4. Увімкни «Точна геолокація» (перемикач)\n\n"
+    "⚠️ Без цього маршрут буде записуватись з великими пропусками "
+    "і кілометраж буде неточним."
+)
+
+
+@router.message(Command("remind_ios"))
+async def cmd_remind_ios(message: Message):
+    """Надіслати водію нагадування про налаштування геолокації iOS."""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ Недостатньо прав.")
+        return
+
+    users   = await get_all_users()
+    drivers = [u for u in users if u["is_approved"]]
+
+    if not drivers:
+        await message.answer("❌ Немає активних водіїв.")
+        return
+
+    await message.answer(
+        "📱 Оберіть водія для надсилання нагадування про налаштування iOS геолокації:",
+        reply_markup=kb_remind_ios_drivers(drivers),
+    )
+
+
+@router.callback_query(F.data.startswith("ios:"))
+async def cb_remind_ios(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Недостатньо прав.", show_alert=True)
+        return
+
+    action = callback.data[4:]  # strip "ios:"
+
+    if action == "cancel":
+        await callback.answer("Скасовано.")
+        await callback.message.edit_reply_markup(reply_markup=None)
+        return
+
+    try:
+        driver_id = int(action)
+    except ValueError:
+        await callback.answer("Невідома дія.", show_alert=True)
+        return
+
+    users       = await get_all_users()
+    driver      = next((u for u in users if u["telegram_id"] == driver_id), None)
+    driver_name = driver["full_name"] if driver else str(driver_id)
+
+    try:
+        await callback.bot.send_message(
+            driver_id,
+            _IOS_REMINDER_TEXT,
+            reply_markup=kb_ios_location_settings(),
+        )
+        await callback.answer("✅ Надіслано")
+        await callback.message.edit_text(
+            f"✅ Нагадування надіслано водію {driver_name}",
+            reply_markup=None,
+        )
+        logger.info(
+            "remind_ios: sent to driver=%d (%s) by admin=%d",
+            driver_id, driver_name, callback.from_user.id,
+        )
+    except Exception as e:
+        await callback.answer("❌ Помилка відправки", show_alert=True)
+        logger.error("remind_ios: failed to send to driver=%d: %s", driver_id, e)

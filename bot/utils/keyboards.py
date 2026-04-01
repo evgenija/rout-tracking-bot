@@ -108,3 +108,29 @@ def kb_route_correction(route_id: int, odometer_diff: float | None) -> InlineKey
 
 def kb_remove() -> ReplyKeyboardRemove:
     return ReplyKeyboardRemove()
+
+
+def kb_remind_ios_drivers(drivers: list) -> InlineKeyboardMarkup:
+    """Список водіїв для /remind_ios — по 3 у рядку + кнопка скасування."""
+    buttons: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for i, d in enumerate(drivers):
+        row.append(InlineKeyboardButton(
+            text=f"👤 {d['full_name']}",
+            callback_data=f"ios:{d['telegram_id']}",
+        ))
+        if len(row) == 3 or i == len(drivers) - 1:
+            buttons.append(row)
+            row = []
+    buttons.append([InlineKeyboardButton(text="❌ Скасувати", callback_data="ios:cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def kb_ios_location_settings() -> InlineKeyboardMarkup:
+    """Кнопка відкриття налаштувань геолокації iOS — надсилається водію."""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="⚙️ Відкрити налаштування геолокації",
+            url="App-prefs:Privacy&path=LOCATION",
+        )
+    ]])
