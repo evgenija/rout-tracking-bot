@@ -4,6 +4,8 @@ import math
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from bot.utils.time_utils import get_kyiv_time, to_kyiv_time
+
 import aiohttp
 
 logger = logging.getLogger(__name__)
@@ -199,8 +201,8 @@ async def is_suspicious(
     """
     distance = haversine(lat1, lon1, lat2, lon2)
 
-    t1 = datetime.fromisoformat(time1)
-    t2 = datetime.fromisoformat(time2)
+    t1 = to_kyiv_time(datetime.fromisoformat(time1))
+    t2 = to_kyiv_time(datetime.fromisoformat(time2))
     elapsed_minutes = abs((t2 - t1).total_seconds() / 60)
 
     # ── Рівень 1: швидкісні перевірки ────────────────────────────────────────
@@ -279,8 +281,8 @@ def is_spike(
 
 def format_duration(start_time: str, end_time: Optional[str]) -> str:
     """Форматує тривалість між двома ISO-timestamp'ами."""
-    t1 = datetime.fromisoformat(start_time)
-    t2 = datetime.fromisoformat(end_time) if end_time else datetime.now()
+    t1 = to_kyiv_time(datetime.fromisoformat(start_time))
+    t2 = to_kyiv_time(datetime.fromisoformat(end_time)) if end_time else get_kyiv_time()
     delta = t2 - t1
     hours = int(delta.total_seconds() // 3600)
     minutes = int((delta.total_seconds() % 3600) // 60)

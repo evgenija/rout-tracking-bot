@@ -131,7 +131,7 @@ async def auto_close_active_routes(bot: Bot):
             if waypoints:
                 finished_at = waypoints[-1]["timestamp"]
             else:
-                finished_at = datetime.now().isoformat()
+                finished_at = get_kyiv_time().isoformat()
 
             total_km = await get_road_distance_for_route(waypoints)
             await end_route(route_id, finished_at, total_km)

@@ -179,7 +179,7 @@ async def cmd_start_route(message: Message, state: FSMContext):
         group_time_suffix = ""  # час вже в group_label
     else:
         # Новий маршрут
-        now = datetime.now().isoformat()
+        now = get_kyiv_time().isoformat()
         route_id = await start_route(user_id, now)
         label = f"🚀 Маршрут #{route_id} розпочато!"
         group_label = f"🚀 Водій {user['full_name']} розпочав маршрут #{route_id}"
@@ -253,7 +253,7 @@ async def handle_finish_location(message: Message, state: FSMContext):
 
     lat = message.location.latitude
     lon = message.location.longitude
-    now = datetime.now().isoformat()
+    now = get_kyiv_time().isoformat()
     await add_waypoint(route_id, lat, lon, "Фініш", now, False)
 
     # Розрахунок кілометражу (включно з точкою Фінішу)
@@ -285,8 +285,8 @@ async def handle_finish_location(message: Message, state: FSMContext):
         except Exception as e:
             logger.warning("Не вдалося надіслати фініш-геомітку в груповий чат: %s", e)
 
-    start_dt = datetime.fromisoformat(start_time) if start_time else datetime.now()
-    delta = datetime.now() - start_dt
+    start_dt = datetime.fromisoformat(start_time) if start_time else get_kyiv_time()
+    delta = get_kyiv_time() - to_kyiv_time(start_dt)
     hours, rem = divmod(int(delta.total_seconds()), 3600)
     minutes = rem // 60
 
@@ -322,7 +322,7 @@ async def handle_finish_odometer(message: Message, state: FSMContext):
     start_hm      = data["finish_start_hm"]
     finish_hm     = data["finish_hm"]
     finish_date   = data["finish_date"]
-    end_time      = data.get("finish_end_time", datetime.now().isoformat())
+    end_time      = data.get("finish_end_time", get_kyiv_time().isoformat())
     is_adm        = data["finish_is_adm"]
     odometer_start = data.get("finish_odometer_start")
 
@@ -424,7 +424,7 @@ async def handle_start_location(message: Message, state: FSMContext):
 
     lat = message.location.latitude
     lon = message.location.longitude
-    now = datetime.now().isoformat()
+    now = get_kyiv_time().isoformat()
     await add_waypoint(route_id, lat, lon, "Старт", now, False)
 
     user = await get_user(message.from_user.id)
@@ -517,7 +517,7 @@ async def handle_waypoint_name(message: Message, state: FSMContext):
         await message.answer("❌ Помилка: геолокація не знайдена. Надішліть знову.")
         return
 
-    now = datetime.now().isoformat()
+    now = get_kyiv_time().isoformat()
 
     user = await get_user(user_id)
 

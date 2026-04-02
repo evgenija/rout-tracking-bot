@@ -324,7 +324,7 @@ async def set_route_correction(
     total_km оновлюється тільки якщо передано (не None).
     correction_type: 'odometer' | 'recalculated' | 'pending_clarification'
     """
-    now = datetime.now().isoformat()
+    now = get_kyiv_time().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         if total_km is not None:
             await db.execute(
