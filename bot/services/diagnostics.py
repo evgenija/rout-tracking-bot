@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TypedDict
 
 from bot.models.database import get_route_waypoints
@@ -84,6 +84,8 @@ async def diagnose_route(route_id: int) -> DiagnosisResult:
         if t1 is None or t2 is None:
             continue
 
+        t1 = t1 if t1.tzinfo is not None else t1.replace(tzinfo=timezone.utc)
+        t2 = t2 if t2.tzinfo is not None else t2.replace(tzinfo=timezone.utc)
         dt_min = abs((t2 - t1).total_seconds() / 60)
         if dt_min > max_gap_min:
             max_gap_min = dt_min
