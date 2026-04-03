@@ -71,7 +71,7 @@ def _format_odometer_accuracy(
     """Повертає (текст_секції, потрібен_алерт).
 
     Обробляє 5 сценаріїв наявності/відсутності одометрових даних.
-    Алерт = True тільки в сценарії 1 (обидва введено, diff > 0) при похибці > 30%.
+    Алерт = True тільки в сценарії 1 (обидва введено, diff > 0) при похибці > 25%.
     """
     has_start  = odometer_start is not None
     has_finish = odometer_km is not None
@@ -90,9 +90,9 @@ def _format_odometer_accuracy(
         diff_pct = abs(total_km - odometer_diff) / odometer_diff * 100
         if diff_pct <= 10:
             label = "✅ Норма"
+        elif diff_pct <= 15:
+            label = "⚠️ Waze/місто (очікувано)"
         elif diff_pct <= 25:
-            label = "⚠️ Місто/Waze (очікувано)"
-        elif diff_pct <= 40:
             label = "🔶 Перевірити маршрут"
         else:
             label = "🔴 Критична розбіжність"
@@ -102,7 +102,7 @@ def _format_odometer_accuracy(
             f"   Трекінг: {total_km:.2f} км\n"
             f"   Похибка: {diff_pct:.1f}%  {label}"
         )
-        return text, diff_pct > 30
+        return text, diff_pct > 25
 
     if not has_start and has_finish:
         # Сценарій 2
@@ -346,13 +346,13 @@ async def handle_finish_odometer(message: Message, state: FSMContext):
     await state.clear()
 
     # Правило 2.4 — діагностика критичної розбіжності
-    # Тригер: ручне закриття + обидва одометри є + трекінг > одометра + похибка > 40%
+    # Тригер: ручне закриття + обидва одометри є + похибка > 25% (будь-який напрямок)
     # total_km НЕ замінюється автоматично — тільки через кнопку адміна (Крок 4)
     if odometer_start is not None and odometer_km is not None:
         _odo_diff = odometer_km - odometer_start
-        if _odo_diff > 0 and total_km > _odo_diff:
-            _pct = (total_km - _odo_diff) / _odo_diff * 100
-            if _pct > 40.0:
+        if _odo_diff > 0:
+            _pct = abs(total_km - _odo_diff) / _odo_diff * 100
+            if _pct > 25.0:
                 _diag = await diagnose_route(route_id)
                 _labels = {
                     "reb":     "РЕБ-спуфінг (ймовірний)",
