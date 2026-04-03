@@ -90,7 +90,7 @@ async def diagnose_route(route_id: int) -> DiagnosisResult:
         if dt_min > max_gap_min:
             max_gap_min = dt_min
 
-        if dt_min > 0:
+        if dt_min > 0 and not p1.get("is_suspicious") and not p2.get("is_suspicious"):
             dist = haversine(p1["lat"], p1["lon"], p2["lat"], p2["lon"])
             speed = dist / (dt_min / 60)
             if speed > max_speed_kmh:
