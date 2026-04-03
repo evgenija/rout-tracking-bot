@@ -253,8 +253,7 @@ async def get_todays_finished_route(driver_id: int) -> Optional[Dict]:
 
 
 async def get_all_active_routes_today() -> List[Dict]:
-    """Всі активні маршрути за сьогодні з даними водія."""
-    today = get_kyiv_time().date().isoformat()
+    """Всі активні маршрути (незалежно від дати старту) з даними водія."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
@@ -263,9 +262,8 @@ async def get_all_active_routes_today() -> List[Dict]:
                    u.full_name, u.telegram_id
             FROM routes r
             JOIN users u ON r.driver_id = u.telegram_id
-            WHERE r.is_active = 1 AND DATE(r.start_time) = ?
+            WHERE r.is_active = 1
             """,
-            (today,),
         ) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
