@@ -390,6 +390,26 @@ async def get_route_waypoints(route_id: int) -> List[Dict]:
             return [dict(r) for r in rows]
 
 
+async def get_route_waypoints_from_last_start(route_id: int) -> List[Dict]:
+    """Повертає waypoints починаючи з останнього 'Старт' включно."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM waypoints WHERE route_id = ? ORDER BY timestamp",
+            (route_id,)
+        ) as cursor:
+            all_waypoints = await cursor.fetchall()
+    all_waypoints = [dict(w) for w in all_waypoints]
+    # Знайти індекс останнього "Старт"
+    last_start_idx = None
+    for i, w in enumerate(all_waypoints):
+        if w.get("name") == "Старт":
+            last_start_idx = i
+    if last_start_idx is None:
+        return all_waypoints  # fallback — повернути всі
+    return all_waypoints[last_start_idx:]
+
+
 async def get_last_waypoint(route_id: int) -> Optional[Dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row

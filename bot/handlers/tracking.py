@@ -19,6 +19,7 @@ from bot.models.database import (
     get_last_waypoint,
     get_last_valid_waypoint,
     get_route_waypoints,
+    get_route_waypoints_from_last_start,
     get_todays_finished_route,
     get_todays_route,
     get_user,
@@ -257,7 +258,7 @@ async def handle_finish_location(message: Message, state: FSMContext):
     await add_waypoint(route_id, lat, lon, "Фініш", now, False)
 
     # Розрахунок кілометражу (включно з точкою Фінішу)
-    waypoints = await get_route_waypoints(route_id)
+    waypoints = await get_route_waypoints_from_last_start(route_id)
     total_km = await get_road_distance_for_route(waypoints)
     if total_km > 1000:
         from bot.utils.geo import calculate_route_distance
