@@ -312,7 +312,7 @@ async def handle_finish_location(message: Message, state: FSMContext):
 
 
 @router.message(OdometerState.waiting_for_finish_odometer)
-async def handle_finish_odometer(message: Message, state: FSMContext):
+async def handle_finish_odometer(message: Message, state: FSMContext, pg_pool=None):
     data = await state.get_data()
 
     route_id      = data["finish_route_id"]
@@ -379,6 +379,31 @@ async def handle_finish_odometer(message: Message, state: FSMContext):
 
     await end_route(route_id, end_time, total_km)
     await save_odometer(route_id, odometer_km)
+
+    # P2 hook — розрахунок вартості логістики
+    # Не змінює логіку P1. Якщо P2 впаде — P1 продовжує працювати.
+    try:
+        from bot.services.route_cost_service import on_route_finished
+        from bot.services.coefficients_service import CoefficientsService
+
+        _user = await get_user(message.from_user.id)
+        _driver_type = (_user or {}).get("driver_type") or "own"
+        _km = float(odometer_km or total_km or 0)
+
+        if pg_pool:
+            _coeffs_svc = CoefficientsService(pg_pool)
+            _coefficients = await _coeffs_svc.get()
+            await on_route_finished(
+                route_id=route_id,
+                driver_id=message.from_user.id,
+                driver_type=_driver_type,
+                km=_km,
+                coefficients=_coefficients,
+                pg_pool=pg_pool,
+                bot=message.bot,
+            )
+    except Exception as _e:
+        logger.warning("P2 route cost hook failed: %s", _e)
 
     odo_section, should_alert = _format_odometer_accuracy(total_km, odometer_start, odometer_km)
 

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+import asyncpg
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -8,6 +9,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from aiogram.types import BotCommand, BotCommandScopeChat
 from bot.config import BOT_NAME, BOT_TOKEN, ADMIN_IDS, SUPER_ADMIN_IDS
+from config_p2 import PG_DATABASE_URL
+from bot.services.db_init_p2 import create_p2_tables
 from bot.handlers import admin, auth, reports, tracking
 from bot.models.database import (
     init_db,
@@ -43,6 +46,14 @@ async def main():
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher(storage=MemoryStorage())
+
+    if PG_DATABASE_URL:
+        pg_pool = await asyncpg.create_pool(PG_DATABASE_URL)
+        await create_p2_tables(pg_pool)
+        dp["pg_pool"] = pg_pool
+        logger.info("P2 PostgreSQL pool ініціалізовано.")
+    else:
+        logger.warning("PG_DATABASE_URL не задано — P2 функції вимкнено.")
 
     dp.include_router(auth.router)
     dp.include_router(admin.router)

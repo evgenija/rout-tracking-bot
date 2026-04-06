@@ -30,3 +30,15 @@ async def create_p2_tables(pool):
                 created_at TIMESTAMP DEFAULT NOW()
             );
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS daily_input (
+                id SERIAL PRIMARY KEY,
+                date DATE NOT NULL,
+                route_id INTEGER,
+                driver_id INTEGER,
+                driver_type VARCHAR(20) DEFAULT 'own',
+                km FLOAT,
+                logistics_cost FLOAT,
+                created_at TIMESTAMP DEFAULT NOW()
+            );
+        """)
