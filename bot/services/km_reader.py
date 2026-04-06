@@ -2,13 +2,16 @@
 km_reader.py — читає km з P1 таблиць для P2 розрахунків.
 ТІЛЬКИ SELECT. Жодних змін в P1 даних.
 
-P1 на Railway використовує PostgreSQL (asyncpg).
-Той самий pool що і решта P2 сервісів.
+P1 використовує SQLite (aiosqlite) і на Railway, і локально.
+P2 PostgreSQL pool — тільки для P2 таблиць (coefficients, monthly_data).
 Таблиця 'users' (не 'drivers') — driver_id посилається на users.telegram_id.
 Колонка driver_type додається міграцією add_driver_type.sql до таблиці users.
 """
+import aiosqlite
 from dataclasses import dataclass
 from datetime import date
+
+from bot.config import DB_PATH
 
 
 @dataclass
@@ -23,21 +26,25 @@ async def get_daily_km(pool, target_date: date) -> DailyKm:
     Читає сумарні km за день з P1 таблиці routes.
     Розділяє за driver_type: 'logistics' | 'own'.
     Використовує total_km. P1 таблиці не змінювати.
+
+    pool — не використовується (P1 SQLite), зарезервовано для сумісності API.
     """
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
             """
             SELECT
-                COALESCE(u.driver_type, 'own')       AS driver_type,
-                SUM(COALESCE(r.total_km, 0))          AS total_km
+                COALESCE(u.driver_type, 'own')  AS driver_type,
+                SUM(COALESCE(r.total_km, 0))     AS total_km
             FROM routes r
             LEFT JOIN users u ON r.driver_id = u.telegram_id
-            WHERE (r.start_time AT TIME ZONE 'Europe/Kyiv')::date = $1
-              AND r.is_active = false
+            WHERE DATE(r.start_time) = ?
+              AND r.is_active = 0
             GROUP BY COALESCE(u.driver_type, 'own')
             """,
-            target_date,
-        )
+            (target_date.isoformat(),),
+        ) as cur:
+            rows = await cur.fetchall()
 
     logistics_km = 0.0
     own_km = 0.0
