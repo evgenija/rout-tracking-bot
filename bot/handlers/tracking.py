@@ -383,11 +383,10 @@ async def handle_finish_odometer(message: Message, state: FSMContext, pg_pool=No
     # P2 hook — розрахунок вартості логістики
     # Не змінює логіку P1. Якщо P2 впаде — P1 продовжує працювати.
     try:
-        from bot.services.route_cost_service import on_route_finished
+        from bot.services.route_cost_service import on_route_finished, get_driver_type
         from bot.services.coefficients_service import CoefficientsService
 
-        _user = await get_user(message.from_user.id)
-        _driver_type = (_user or {}).get("driver_type") or "own"
+        _driver_type = get_driver_type(message.from_user.id)
         _km = float(odometer_km or total_km or 0)
 
         if pg_pool:
