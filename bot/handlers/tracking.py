@@ -259,6 +259,7 @@ async def handle_finish_location(message: Message, state: FSMContext):
 
     # Розрахунок кілометражу (включно з точкою Фінішу)
     waypoints = await get_route_waypoints_from_last_start(route_id)
+    valid = [wp for wp in waypoints if not wp.get("is_suspicious")]
     total_km = await get_road_distance_for_route(waypoints)
     if total_km > 1000:
         from bot.utils.geo import calculate_route_distance
@@ -267,7 +268,7 @@ async def handle_finish_location(message: Message, state: FSMContext):
             "Маршрут #%s: аномальний km=%.2f (підозрілих %d/%d) — fallback haversine×1.4",
             route_id, total_km, suspicious_count, len(waypoints),
         )
-        total_km = round(calculate_route_distance(waypoints) * 1.4, 2)
+        total_km = round(calculate_route_distance(valid if valid else waypoints) * 1.4, 2)
         for admin_id in ADMIN_IDS:
             try:
                 await message.bot.send_message(
@@ -293,6 +294,11 @@ async def handle_finish_location(message: Message, state: FSMContext):
 
     _now_kyiv = get_kyiv_time()
     _start_hm = to_kyiv_time(start_dt).strftime('%H:%M') if start_time else _now_kyiv.strftime('%H:%M')
+    # Фікс 3: перерахунок з урахуванням suspicious точок перед збереженням у FSM
+    waypoints_fresh = await get_route_waypoints_from_last_start(route_id)
+    valid_fresh = [wp for wp in waypoints_fresh if not wp.get("is_suspicious")]
+    if len(valid_fresh) >= 2:
+        total_km = await get_road_distance_for_route(valid_fresh)
     await state.update_data(
         finish_total_km=total_km,
         finish_waypoint_count=len(waypoints),
@@ -387,7 +393,8 @@ async def handle_finish_odometer(message: Message, state: FSMContext, pg_pool=No
         from bot.services.coefficients_service import CoefficientsService
 
         _driver_type = get_driver_type(message.from_user.id)
-        _km = float(odometer_km or total_km or 0)
+        _odo_diff = (odometer_km or 0) - (odometer_start or 0)
+        _km = float(_odo_diff if _odo_diff > 0 else total_km or 0)
 
         if pg_pool:
             _coeffs_svc = CoefficientsService(pg_pool)
