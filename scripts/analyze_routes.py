@@ -253,17 +253,15 @@ def main():
                 g2h = ""
 
             # STEP 4 — baseline alert
-            alert = (dist_used > 60 and avg_speed is not None and avg_speed < 35)
+            alert = (dist_used > 60 and avg_speed is not None and avg_speed < 25)
 
             # STEP 5 — scoring
             score = 0
             if dist_used > 60:
                 score += 1
-            if avg_speed is not None and avg_speed < 35:
+            if avg_speed is not None and avg_speed < 25:
                 score += 2
             if time_gap > 120:
-                score += 1
-            if g2h != "" and g2h > 1.5:
                 score += 1
 
             if score <= 1:
@@ -322,7 +320,7 @@ def main():
             continue  # invalid odometer values
 
         gap_pct = round(abs(odo_diff - (tracker_km or 0)) / odo_diff, 4)
-        alert_mismatch = gap_pct > 0.25
+        alert_mismatch = gap_pct > 0.10
 
         route_rows.append({
             "route_id":            route["id"],
