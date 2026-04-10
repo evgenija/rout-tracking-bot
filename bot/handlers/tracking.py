@@ -30,6 +30,8 @@ from bot.models.database import (
     start_route,
 )
 from bot.services.diagnostics import diagnose_route
+from bot.services import ping_service
+from bot.handlers.ping_handler import build_ping_keyboard
 from bot.utils.geo import get_road_distance_for_route
 from bot.utils.geo import is_spike
 from bot.utils.geo import is_suspicious as check_suspicious
@@ -564,6 +566,7 @@ async def handle_waypoint_name(message: Message, state: FSMContext):
         last_wp = await get_last_waypoint(route_id)  # fallback: всі попередні підозрілі
     suspicious = False
     if last_wp:
+        # Правило 1.1 + геозони (без Level 2 — його обробляє ping-флоу нижче)
         suspicious = await check_suspicious(
             last_wp["lat"], last_wp["lon"], last_wp["timestamp"],
             lat, lon, now,
@@ -572,9 +575,22 @@ async def handle_waypoint_name(message: Message, state: FSMContext):
             driver_name=user["full_name"],
             route_id=route_id,
             admin_ids=list(set(ADMIN_IDS + SUPER_ADMIN_IDS)),
+            skip_level2=True,
         )
 
     await add_waypoint(route_id, lat, lon, point_name, now, suspicious)
+
+    # Правила 1.2 і 1.3 — ping-флоу (після збереження, щоб мати waypoint id)
+    if last_wp and not suspicious and ping_service.should_ping(
+        last_wp, {"lat": lat, "lon": lon, "timestamp": now}, MAX_DISTANCE_KM
+    ):
+        new_wp = await get_last_waypoint(route_id)
+        await message.bot.send_message(
+            chat_id=user_id,
+            text=f"🚗 {user['full_name']}, ви ще працюєте по маршруту?",
+            reply_markup=build_ping_keyboard(new_wp["id"]),
+        )
+        ping_service.mark_ping_sent(new_wp["id"])
 
     # GPS spike (правило 1.6): ретроспективно перевіряємо попередню точку B
     # Логіка: щойно збережена точка = C; якщо dist(A,B)>20 і dist(B,C)<dist(A,B)*0.3 → B spike

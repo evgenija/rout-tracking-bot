@@ -184,6 +184,7 @@ async def is_suspicious(
     driver_name: str = "невідомий",
     route_id: int | None = None,
     admin_ids: list | None = None,
+    skip_level2: bool = False,
 ) -> bool:
     """Повертає True, якщо точка підозріла (GPS-спуфінг / РЕБ / поза геозоною).
 
@@ -192,7 +193,7 @@ async def is_suspicious(
       • Неможлива швидкість: > 160 км/год між мітками
       • Комбінована: dist > 35 км І speed > 150 км/год одночасно
 
-    Рівень 2 — абсолютний поріг:
+    Рівень 2 — абсолютний поріг (пропускається при skip_level2=True — ping-флоу в tracking.py):
       • Відстань > max_distance_km (130 км) за будь-який час
 
     Рівень 3 — геозони (нові):
@@ -222,8 +223,8 @@ async def is_suspicious(
         if distance > 35.0 and speed_kmh > 150.0:
             return True
 
-    # ── Рівень 2: абсолютний поріг відстані ──────────────────────────────────
-    if distance > max_distance_km:
+    # ── Рівень 2: абсолютний поріг відстані (ping-флоу в tracking.py) ────────
+    if not skip_level2 and distance > max_distance_km:
         return True
 
     # ── Рівень 3: геозони ─────────────────────────────────────────────────────

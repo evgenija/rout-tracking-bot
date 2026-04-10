@@ -82,6 +82,19 @@ async def init_db():
             )
         except Exception:
             pass  # колонка вже існує
+        # Міграція: ping-флоу для правил 1.2/1.3
+        try:
+            await db.execute(
+                "ALTER TABLE waypoints ADD COLUMN ping_sent_at TEXT DEFAULT NULL"
+            )
+        except Exception:
+            pass  # колонка вже існує
+        try:
+            await db.execute(
+                "ALTER TABLE waypoints ADD COLUMN ping_response TEXT DEFAULT NULL"
+            )
+        except Exception:
+            pass  # колонка вже існує
         await db.commit()
 
 

@@ -11,7 +11,7 @@ from aiogram.types import BotCommand, BotCommandScopeChat
 from bot.config import BOT_NAME, BOT_TOKEN, ADMIN_IDS, SUPER_ADMIN_IDS
 from config_p2 import PG_DATABASE_URL
 from bot.services.db_init_p2 import create_p2_tables
-from bot.handlers import admin, auth, reports, tracking
+from bot.handlers import admin, auth, reports, tracking, ping_handler
 from bot.models.database import (
     init_db,
     flag_suspicious_waypoints_retroactive,
@@ -59,6 +59,7 @@ async def main():
     dp.include_router(admin.router)
     dp.include_router(tracking.router)
     dp.include_router(reports.router)
+    dp.include_router(ping_handler.ping_router)
 
     setup_scheduler(bot)
 

@@ -175,6 +175,39 @@ async def auto_close_active_routes(bot: Bot):
             logger.error("Помилка авто-закриття маршруту #%s: %s", route_id, e)
 
 
+async def check_unanswered_pings(bot: Bot) -> None:
+    """Scheduler job: позначає як suspicious waypoints без відповіді на ping > 30 хв."""
+    from datetime import timezone, timedelta
+    import sqlite3 as _sqlite3
+    from bot.services import ping_service
+    from bot.config import DB_PATH, ADMIN_IDS, SUPER_ADMIN_IDS
+    _KYIV = timezone(timedelta(hours=3))
+    unanswered = ping_service.get_unanswered_pings()
+    for wp in unanswered:
+        conn = _sqlite3.connect(DB_PATH)
+        conn.execute("UPDATE waypoints SET is_suspicious = 1 WHERE id = ?", (wp["id"],))
+        conn.commit()
+        conn.close()
+        driver_name = wp["driver_name"] or "Водій"
+        try:
+            wp_time = datetime.fromisoformat(wp["timestamp"])
+            if wp_time.tzinfo is None:
+                wp_time = wp_time.replace(tzinfo=_KYIV)
+            gap_minutes = int((datetime.now(_KYIV) - wp_time).total_seconds() / 60)
+        except Exception:
+            gap_minutes = 0
+        alert_text = (
+            f"⚠️ {driver_name} не відповів на перевірку\n"
+            f"Без геомітки {gap_minutes} хв — "
+            f"наступні точки позначатимуться як підозрілі"
+        )
+        for admin_id in list(set(ADMIN_IDS + SUPER_ADMIN_IDS)):
+            try:
+                await bot.send_message(chat_id=admin_id, text=alert_text)
+            except Exception as exc:
+                logger.warning("Алерт адміну %d не надіслано: %s", admin_id, exc)
+
+
 def setup_scheduler(bot: Bot):
     scheduler.add_job(
         send_daily_report,
@@ -202,6 +235,13 @@ def setup_scheduler(bot: Bot):
         CronTrigger(hour=23, minute=59),
         args=[bot],
         id="auto_close_routes",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        check_unanswered_pings,
+        CronTrigger(minute="*/5"),
+        args=[bot],
+        id="check_unanswered_pings",
         replace_existing=True,
     )
     scheduler.start()
