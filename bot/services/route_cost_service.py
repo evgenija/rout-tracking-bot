@@ -37,7 +37,7 @@ async def on_route_finished(
     if driver_type == "logistics":
         cost = _calc_logistics_cost(km, coefficients)
     else:
-        cost = km * coefficients.get("own_driver_cost_per_km", 0)
+        cost = km * coefficients["own_driver_cost_per_km"]
 
     # Зберегти в P2 PostgreSQL
     try:
@@ -58,11 +58,12 @@ async def on_route_finished(
     def fmt(v):
         return f"{v:,.0f}".replace(",", " ")
 
+    cost_label = "логістики" if driver_type == "logistics" else "власного водія"
     text = (
         f"🚛 Маршрут #{route_id} завершено\n"
         f"👤 Водій ID: {driver_id} | Тип: {driver_type}\n"
         f"📏 km: {km:.1f}\n"
-        f"💰 Вартість логістики: {fmt(cost)} грн"
+        f"💰 Вартість {cost_label}: {fmt(cost)} грн"
     )
     for admin_id in SUPER_ADMIN_IDS:
         try:

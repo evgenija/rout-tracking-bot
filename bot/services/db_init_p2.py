@@ -42,3 +42,11 @@ async def create_p2_tables(pool):
                 created_at TIMESTAMP DEFAULT NOW()
             );
         """)
+        # Seed: вартість власного водія. Оновлює тільки якщо значення NULL.
+        await conn.execute("""
+            INSERT INTO coefficients (key, value, description)
+            VALUES ('own_driver_cost_per_km', 18.50, 'Вартість власного водія (грн/км)')
+            ON CONFLICT (key) DO UPDATE
+                SET value = EXCLUDED.value, description = EXCLUDED.description
+                WHERE coefficients.value IS NULL
+        """)
