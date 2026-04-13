@@ -208,6 +208,83 @@ async def check_unanswered_pings(bot: Bot) -> None:
                 logger.warning("Алерт адміну %d не надіслано: %s", admin_id, exc)
 
 
+async def check_active_route_gaps(bot: Bot) -> None:
+    """Scheduler job: ping driver if last waypoint > 60 min ago and no ping sent yet."""
+    import sqlite3 as _sqlite3
+    from datetime import timezone, timedelta
+    from bot.services import ping_service
+    from bot.config import DB_PATH, MAX_DISTANCE_KM
+    from bot.handlers.ping_handler import build_ping_keyboard
+
+    _KYIV = timezone(timedelta(hours=3))
+    now = datetime.now(_KYIV)
+    gap_cutoff = (now - timedelta(minutes=60)).isoformat()
+
+    conn = _sqlite3.connect(DB_PATH)
+    conn.row_factory = _sqlite3.Row
+    active_routes = conn.execute(
+        "SELECT id, driver_id FROM routes WHERE status = 'active'"
+    ).fetchall()
+
+    to_ping = []
+    for route in active_routes:
+        route_id = route["id"]
+        wps = conn.execute(
+            """SELECT w.id, w.timestamp, w.lat, w.lon, w.ping_sent_at,
+                      u.full_name as driver_name
+               FROM waypoints w
+               JOIN routes r ON r.id = w.route_id
+               LEFT JOIN users u ON u.telegram_id = r.driver_id
+               WHERE w.route_id = ?
+               ORDER BY w.timestamp DESC LIMIT 2""",
+            (route_id,)
+        ).fetchall()
+
+        if not wps:
+            continue
+        last_wp = dict(wps[0])
+        if last_wp["ping_sent_at"] is not None:
+            continue
+
+        should_ping = False
+        # Rule 1.3: gap > 60 хв — водій мовчить без нових геоміток
+        if last_wp["timestamp"] < gap_cutoff:
+            should_ping = True
+        # Rule 1.2: стрибок > MAX_DISTANCE_KM від попередньої точки
+        if not should_ping and len(wps) >= 2:
+            prev_wp = dict(wps[1])
+            if ping_service._haversine(
+                prev_wp["lat"], prev_wp["lon"],
+                last_wp["lat"], last_wp["lon"],
+            ) > MAX_DISTANCE_KM:
+                should_ping = True
+
+        if should_ping:
+            to_ping.append({
+                "route_id": route_id,
+                "driver_id": route["driver_id"],
+                "wp_id": last_wp["id"],
+                "driver_name": last_wp["driver_name"] or "Водій",
+            })
+
+    conn.close()
+
+    for item in to_ping:
+        try:
+            await bot.send_message(
+                chat_id=item["driver_id"],
+                text=f"🚗 {item['driver_name']}, ви ще працюєте по маршруту?",
+                reply_markup=build_ping_keyboard(item["wp_id"]),
+            )
+            ping_service.mark_ping_sent(item["wp_id"])
+            logger.info(
+                "Scheduler ping sent: route=%d wp=%d driver=%d",
+                item["route_id"], item["wp_id"], item["driver_id"],
+            )
+        except Exception as exc:
+            logger.warning("Scheduler ping failed: route=%d err=%s", item["route_id"], exc)
+
+
 def setup_scheduler(bot: Bot):
     scheduler.add_job(
         send_daily_report,
@@ -242,6 +319,13 @@ def setup_scheduler(bot: Bot):
         CronTrigger(minute="*/5"),
         args=[bot],
         id="check_unanswered_pings",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        check_active_route_gaps,
+        CronTrigger(minute="*/5"),
+        args=[bot],
+        id="check_active_route_gaps",
         replace_existing=True,
     )
     scheduler.start()
