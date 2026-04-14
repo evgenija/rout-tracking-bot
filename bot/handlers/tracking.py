@@ -6,7 +6,7 @@ from bot.utils.time_utils import get_kyiv_time, to_kyiv_time
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.utils.keyboards import kb_driver_idle, kb_driver_active, kb_admin_driver_idle, kb_admin_driver_active
 
@@ -438,6 +438,16 @@ async def handle_finish_odometer(message: Message, state: FSMContext, pg_pool=No
             await message.bot.send_message(admin_id, admin_msg)
         except Exception as e:
             logger.warning("Не вдалося надіслати фініш адміну %s: %s", admin_id, e)
+
+    _detail_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🔍 Деталі маршруту", callback_data=f"route_detail:{route_id}")
+    ]])
+    for super_id in SUPER_ADMIN_IDS:
+        if super_id not in ADMIN_IDS:
+            try:
+                await message.bot.send_message(super_id, admin_msg, reply_markup=_detail_kb)
+            except Exception as e:
+                logger.warning("Не вдалося надіслати фініш супер-адміну %s: %s", super_id, e)
 
     if not _is_silent_driver(message.from_user.id):
         try:
