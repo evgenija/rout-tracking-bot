@@ -50,3 +50,13 @@ async def create_p2_tables(pool):
                 SET value = EXCLUDED.value, description = EXCLUDED.description
                 WHERE coefficients.value IS NULL
         """)
+        await conn.execute("""
+            INSERT INTO coefficients (key, value, description)
+            VALUES ('odometer_over_tracking_threshold', 0.05, 'Поріг: одометр > трекінг. Перевищення → рахуємо за трекінгом')
+            ON CONFLICT (key) DO NOTHING
+        """)
+        await conn.execute("""
+            INSERT INTO coefficients (key, value, description)
+            VALUES ('tracking_over_odometer_threshold', 0.03, 'Поріг: трекінг > одометр. Перевищення → рахуємо за одометром')
+            ON CONFLICT (key) DO NOTHING
+        """)

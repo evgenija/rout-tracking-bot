@@ -134,6 +134,36 @@ def route_mode(
     )
 
 
+def select_final_km(
+    tracking_km: float,
+    odometer_km: float | None,
+    coefficients: dict
+) -> tuple[float, str]:
+    """
+    Вибір final_km для розрахунку вартості маршруту.
+    Пороги читаються з coefficients, не хардкодяться.
+    Повертає (km, reason).
+    """
+    over_tracking = coefficients.get('odometer_over_tracking_threshold', 0.05)
+    over_odometer = coefficients.get('tracking_over_odometer_threshold', 0.03)
+
+    if odometer_km is None:
+        return tracking_km, 'odometer_missing'
+    if tracking_km == 0:
+        return odometer_km, 'tracking_zero'
+
+    diff_pct = (odometer_km - tracking_km) / tracking_km
+
+    if abs(diff_pct) <= over_tracking:
+        return odometer_km, 'within_tolerance'
+    if diff_pct > over_tracking:
+        return tracking_km, 'odometer_inflated'
+    if diff_pct <= -over_odometer:
+        return odometer_km, 'gps_noise'
+
+    return odometer_km, 'within_tolerance'
+
+
 def historical_mode(
     revenue: float,
     logistics_km: float,

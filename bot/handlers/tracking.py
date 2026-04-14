@@ -393,13 +393,10 @@ async def handle_finish_odometer(message: Message, state: FSMContext, pg_pool=No
         from bot.services.coefficients_service import CoefficientsService
 
         _driver_type = get_driver_type(message.from_user.id)
+        _tracking_km = float(total_km) if total_km else 0.0
+        _odo_delta = None
         if odometer_km and odometer_start and odometer_km > odometer_start:
-            _km = float(odometer_km - odometer_start)
-        elif total_km and total_km > 0:
-            _km = float(total_km)
-        else:
-            logger.warning("P2 hook skipped route %s: no valid km source", route_id)
-            return
+            _odo_delta = float(odometer_km - odometer_start)
 
         if pg_pool:
             _coeffs_svc = CoefficientsService(pg_pool)
@@ -408,7 +405,9 @@ async def handle_finish_odometer(message: Message, state: FSMContext, pg_pool=No
                 route_id=route_id,
                 driver_id=message.from_user.id,
                 driver_type=_driver_type,
-                km=_km,
+                tracking_km=_tracking_km,
+                odometer_km=_odo_delta,
+                driver_name=user_name,
                 coefficients=_coefficients,
                 pg_pool=pg_pool,
                 bot=message.bot,

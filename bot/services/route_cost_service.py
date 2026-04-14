@@ -6,7 +6,8 @@ route_cost_service.py — розрахунок вартості маршруту
 import logging
 from datetime import date
 
-from bot.services.calculator import _calc_logistics_cost
+from bot.services.calculator import _calc_logistics_cost, select_final_km
+from bot.config import ADMIN_IDS
 from config_p2 import SUPER_ADMIN_IDS
 
 logger = logging.getLogger(__name__)
@@ -22,22 +23,40 @@ async def on_route_finished(
     route_id: int,
     driver_id: int,
     driver_type: str,
-    km: float,
+    tracking_km: float,
+    odometer_km: float | None,
+    driver_name: str,
     coefficients: dict,
     pg_pool,
     bot,
 ) -> None:
     """
     Викликається після кожного завершення маршруту в P1.
-    driver_type: 'logistics' або 'own' (дефолт 'own' якщо не визначено)
-    km: total_km або odometer_km з P1 routes таблиці
+    driver_type: 'logistics' або 'own'
+    tracking_km: GPS total_km з P1 routes
+    odometer_km: delta одометра (odometer_finish - odometer_start), або None якщо відсутній
     pg_pool: існуючий asyncpg pool (не створювати новий)
     """
+    final_km, reason = select_final_km(tracking_km, odometer_km, coefficients)
+
+    if reason == 'odometer_missing':
+        alert_text = (
+            f"⚠️ Маршрут #{route_id} | {driver_name}\n"
+            f"Одометр відсутній. Розрахунок за трекінгом GPS: {tracking_km:.1f} км"
+        )
+        for admin_id in list(set(ADMIN_IDS + SUPER_ADMIN_IDS)):
+            try:
+                await bot.send_message(admin_id, alert_text)
+            except Exception:
+                pass
+    else:
+        logger.info("final_km reason: %s, route_id: %s", reason, route_id)
+
     # Розрахунок вартості
     if driver_type == "logistics":
-        cost = _calc_logistics_cost(km, coefficients)
+        cost = _calc_logistics_cost(final_km, coefficients)
     else:
-        cost = km * coefficients["own_driver_cost_per_km"]
+        cost = final_km * coefficients["own_driver_cost_per_km"]
 
     # Зберегти в P2 PostgreSQL
     try:
@@ -48,7 +67,7 @@ async def on_route_finished(
                     (date, route_id, driver_id, driver_type, km, logistics_cost)
                 VALUES ($1, $2, $3, $4, $5, $6)
                 """,
-                date.today(), route_id, driver_id, driver_type, km, cost,
+                date.today(), route_id, driver_id, driver_type, final_km, cost,
             )
     except Exception as e:
         logger.warning("P2 daily_input save failed: %s", e)
@@ -62,7 +81,7 @@ async def on_route_finished(
     text = (
         f"🚛 Маршрут #{route_id} завершено\n"
         f"👤 Водій ID: {driver_id} | Тип: {driver_type}\n"
-        f"📏 km: {km:.1f}\n"
+        f"📏 km: {final_km:.1f}\n"
         f"💰 Вартість {cost_label}: {fmt(cost)} грн"
     )
     for admin_id in SUPER_ADMIN_IDS:
