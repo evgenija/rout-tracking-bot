@@ -71,7 +71,6 @@ async def on_route_finished(
             )
     except Exception as e:
         logger.warning("P2 daily_input save failed: %s", e)
-        return
 
     # Повідомлення супер-адміну
     def fmt(v):
