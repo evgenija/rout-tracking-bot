@@ -223,7 +223,7 @@ async def check_active_route_gaps(bot: Bot) -> None:
     conn = _sqlite3.connect(DB_PATH)
     conn.row_factory = _sqlite3.Row
     active_routes = conn.execute(
-        "SELECT id, driver_id FROM routes WHERE status = 'active'"
+        "SELECT id, driver_id FROM routes WHERE is_active = 1"
     ).fetchall()
 
     to_ping = []
