@@ -72,7 +72,13 @@ def _anomaly_explanation(
     """Пояснення мовою власника або None якщо відрізок нормальний."""
 
     if speed_kmh is not None and speed_kmh > SPEED_SPIKE_KMH:
-        return "Технічний збій координат — не впливає на розрахунок"
+        km_str  = f"{dist_km:.1f}"   if dist_km   is not None else "?"
+        spd_str = f"{speed_kmh:.0f}" if speed_kmh is not None else "?"
+        return (
+            f"GPS збій на одній точці. Система виключила її з розрахунку і перерахувала "
+            f"відрізок через попередню валідну точку: {km_str} км, {spd_str} км/год — "
+            f"норма. До оплати не впливає."
+        )
 
     if speed_kmh is not None and speed_kmh > SPEED_ANOMALY_KMH:
         return "Аномальна швидкість — можливий збій GPS"
@@ -85,7 +91,10 @@ def _anomaly_explanation(
         ping_response = prev.get("ping_response")
 
         if not ping_sent:
-            return f"Великий розрив — водій не ставив геомітку {_gap_str(gap_min)}"
+            return (
+                f"Водій не ставив геомітку {_gap_str(gap_min)}. Система не може підтвердити "
+                f"маршрут на цьому відрізку. GPS дані відсутні — включено як є."
+            )
         if ping_response == "stopped":
             return f"Водій підтвердив зупинку — {_gap_str(gap_min)} простою"
         if ping_response == "driving":
@@ -94,7 +103,9 @@ def _anomaly_explanation(
         return None
 
     if curr.get("is_suspicious"):
-        return "Позначено системою як підозрілий"
+        spd = f"{speed_kmh:.0f} км/год" if speed_kmh is not None else "—"
+        gap = f"{gap_min:.0f} хв"       if gap_min  is not None else "—"
+        return f"Низька швидкість ({spd}, {gap}). Можлива зупинка без позначки. GPS валідний."
 
     return None
 

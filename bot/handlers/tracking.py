@@ -89,14 +89,12 @@ def _format_odometer_accuracy(
 
         # Сценарій 1 — обидва введено, diff > 0
         diff_pct = abs(total_km - odometer_diff) / odometer_diff * 100
-        if diff_pct <= 10:
-            label = "✅ Норма"
-        elif diff_pct <= 15:
-            label = "⚠️ Waze/місто (очікувано)"
-        elif diff_pct <= 25:
-            label = "🔶 Перевірити маршрут"
+        if diff_pct <= 5:
+            label = "✅"
+        elif diff_pct <= 12:
+            label = "🔶"
         else:
-            label = "🔴 Критична розбіжність"
+            label = "🔴"
         text = (
             f"📌 Одометр: {odometer_start:.0f} → {odometer_km:.0f} км\n"
             f"   Пробіг за одометром: {odometer_diff:.1f} км\n"
@@ -432,15 +430,16 @@ async def handle_finish_odometer(message: Message, state: FSMContext, pg_pool=No
     if should_alert:
         admin_msg += f"\n\n⚠️ Велика розбіжність по маршруту {user_name} — перевір!"
 
-    for admin_id in ADMIN_IDS:
-        try:
-            await message.bot.send_message(admin_id, admin_msg)
-        except Exception as e:
-            logger.warning("Не вдалося надіслати фініш адміну %s: %s", admin_id, e)
-
     _detail_kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="🔍 Деталі маршруту", callback_data=f"route_detail:{route_id}")
     ]])
+    for admin_id in ADMIN_IDS:
+        try:
+            kb = _detail_kb if admin_id in SUPER_ADMIN_IDS else None
+            await message.bot.send_message(admin_id, admin_msg, reply_markup=kb)
+        except Exception as e:
+            logger.warning("Не вдалося надіслати фініш адміну %s: %s", admin_id, e)
+
     for super_id in SUPER_ADMIN_IDS:
         if super_id not in ADMIN_IDS:
             try:

@@ -35,14 +35,12 @@ def _odo_accuracy_block(total_km: float, odo_start, odo_finish) -> str:
     if odo_diff <= 0:
         return f"📍 Одометр: {odo_start:.0f} → {odo_finish:.0f} км\n   ⚠️ Помилка вводу"
     diff_pct = abs(total_km - odo_diff) / odo_diff * 100
-    if diff_pct <= 10:
-        label = "✅ Норма"
-    elif diff_pct <= 25:
-        label = "⚠️ Місто/Waze (очікувано)"
-    elif diff_pct <= 40:
-        label = "🔶 Перевірити маршрут"
+    if diff_pct <= 5:
+        label = "✅"
+    elif diff_pct <= 12:
+        label = "🔶"
     else:
-        label = "🔴 Критична розбіжність"
+        label = "🔴"
     return (
         f"📍 Одометр: {odo_start:.0f} → {odo_finish:.0f} км\n"
         f"   Пробіг за одометром: {odo_diff:.1f} км\n"
