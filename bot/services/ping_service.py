@@ -69,6 +69,7 @@ def get_unanswered_pings() -> list[dict]:
           AND w.ping_response IS NULL
           AND w.ping_sent_at < ?
           AND w.is_suspicious = 0
+          AND r.is_active = 1
         ''',
         (cutoff,)
     ).fetchall()
