@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery
 
-from bot.config import ADMIN_IDS, SUPER_ADMIN_IDS, COMPANY_NAME
+from bot.config import ADMIN_IDS, SUPER_ADMIN_IDS, COMPANY_NAME, MAX_DISTANCE_KM
 from bot.models.database import (
     delete_user,
     get_all_users,
@@ -474,7 +474,7 @@ async def cmd_diag_route(message: Message):
                 speed = dist / (elapsed_min / 60) if elapsed_min >= 0.1 else 0.0
             except Exception:
                 elapsed_s = elapsed_min = speed = 0.0
-            reason = ("DIST " if dist > 200 else "") + \
+            reason = ("DIST " if dist > MAX_DISTANCE_KM else "") + \
                      ("SPEED" if elapsed_min >= 2 and speed > 200 else "")
             reason = reason.strip() or "OK"
             lines.append(
@@ -494,7 +494,7 @@ async def cmd_diag_route(message: Message):
                 speed_lv = dist_lv / (elapsed_min_lv / 60) if elapsed_min_lv >= 0.1 else 0.0
             except Exception:
                 elapsed_s_lv = elapsed_min_lv = speed_lv = 0.0
-            reason_lv = ("DIST " if dist_lv > 200 else "") + \
+            reason_lv = ("DIST " if dist_lv > MAX_DISTANCE_KM else "") + \
                         ("SPEED" if elapsed_min_lv >= 2 and speed_lv > 200 else "")
             reason_lv = reason_lv.strip() or "OK(!)"
             lines.append(

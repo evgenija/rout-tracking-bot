@@ -350,36 +350,25 @@ async def handle_finish_odometer(message: Message, state: FSMContext, pg_pool=No
 
     await state.clear()
 
-    # Правило 2.4 — діагностика критичної розбіжності
-    # Тригер: ручне закриття + обидва одометри є + похибка > 25% (будь-який напрямок)
-    # total_km НЕ замінюється автоматично — тільки через кнопку адміна (Крок 4)
-    if odometer_start is not None and odometer_km is not None:
-        _odo_diff = odometer_km - odometer_start
-        if _odo_diff > 0:
-            _pct = abs(total_km - _odo_diff) / _odo_diff * 100
-            if _pct > 25.0:
-                _diag = await diagnose_route(route_id)
-                _labels = {
-                    "reb":     "РЕБ-спуфінг (ймовірний)",
-                    "ios":     "iOS фоновий режим (ймовірний)",
-                    "unknown": "Причина не визначена",
-                }
-                _diag_text = (
-                    f"🔴 Критична розбіжність — маршрут #{route_id}\n"
-                    f"👤 {user_name} | {get_kyiv_time().strftime('%d.%m.%Y')}\n\n"
-                    f"📊 Трекінг:  {total_km:.2f} км\n"
-                    f"📌 Одометр: {_odo_diff:.1f} км\n"
-                    f"⚠️ Похибка:  {_pct:.1f}%\n\n"
-                    f"🔍 Діагноз: {_labels.get(_diag['diagnosis'], 'Причина не визначена')}\n"
-                    + "\n".join(_diag["indicators"])
-                    + "\n\nЩо робити:"
-                )
-                _kb = kb_route_correction(route_id, _odo_diff)
-                for _admin_id in list(set(ADMIN_IDS + SUPER_ADMIN_IDS)):
-                    try:
-                        await message.bot.send_message(_admin_id, _diag_text, reply_markup=_kb)
-                    except Exception as exc:
-                        logger.warning("Не вдалося надіслати діагностику адміну %d: %s", _admin_id, exc)
+    # Правила 2.4/3.1 — РЕБ/spoofing діагностика при ручному закритті
+    # Тригер: is_suspicious > 20% АБО max_speed > 150 → diagnose_route повертає 'reb'
+    # Рішення по одометру приймає P2 автоматично — кнопка "Прийняти одометр" в P1 відсутня
+    _diag = await diagnose_route(route_id)
+    if _diag['diagnosis'] == 'reb':
+        _diag_text = (
+            f"🔴 РЕБ/споофінг виявлено — маршрут #{route_id}\n"
+            f"👤 {user_name} | {get_kyiv_time().strftime('%d.%m.%Y')}\n\n"
+            f"📊 Трекінг: {total_km:.2f} км\n\n"
+            f"🔍 Діагноз: РЕБ-спуфінг (ймовірний)\n"
+            + "\n".join(_diag["indicators"])
+            + "\n\nЩо робити:"
+        )
+        _kb = kb_route_correction(route_id)
+        for _admin_id in list(set(ADMIN_IDS + SUPER_ADMIN_IDS)):
+            try:
+                await message.bot.send_message(_admin_id, _diag_text, reply_markup=_kb)
+            except Exception as exc:
+                logger.warning("Не вдалося надіслати діагностику адміну %d: %s", _admin_id, exc)
 
     await end_route(route_id, end_time, total_km)
     await save_odometer(route_id, odometer_km)
