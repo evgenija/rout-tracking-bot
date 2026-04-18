@@ -272,6 +272,7 @@ async def get_all_active_routes_today() -> List[Dict]:
         async with db.execute(
             """
             SELECT r.id, r.driver_id, r.start_time,
+                   r.odometer_start,
                    u.full_name, u.telegram_id
             FROM routes r
             JOIN users u ON r.driver_id = u.telegram_id
