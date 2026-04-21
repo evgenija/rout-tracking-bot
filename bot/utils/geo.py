@@ -68,8 +68,8 @@ async def get_road_distance_for_route(waypoints: List[Dict]) -> float:
     - 1 API-запит на весь маршрут (не на кожну пару точок)
 
     Вартість:
-    - Google Directions API: $0.005 за запит (до 100 waypoints включно)
-    - 5 водіїв × 1 запит/маршрут × 30 днів = 150 запитів/місяць ≈ $0.75/місяць
+    - Google Directions API Advanced: $0.010 за запит (>10 зупинок)
+    - 5 водіїв × 1 запит/маршрут × 30 днів = 150 запитів/місяць ≈ $1.50/місяць
     - Значно дешевше за Distance Matrix ($11/місяць при 75 парах/день)
 
     Підозрілі точки (is_suspicious=True) виключаються з маршруту.
@@ -100,7 +100,7 @@ async def get_road_distance_for_route(waypoints: List[Dict]) -> float:
         )
         return round(calculate_route_distance(valid) * 1.4, 2)
 
-    # Google Directions API обмеження: максимум 25 точок (origin + 23 via + destination)
+    # Google Directions API обмеження: максимум 25 проміжних зупинок
     # При більшій кількості — рівномірна вибірка
     if len(valid) > 25:
         logger.warning(
@@ -122,7 +122,7 @@ async def get_road_distance_for_route(waypoints: List[Dict]) -> float:
     }
     if len(valid) > 2:
         params["waypoints"] = "|".join(
-            f"via:{round(wp['lat'], 6)},{round(wp['lon'], 6)}"
+            f"{round(wp['lat'], 6)},{round(wp['lon'], 6)}"
             for wp in valid[1:-1]
         )
 
