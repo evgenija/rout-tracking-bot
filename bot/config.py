@@ -38,6 +38,7 @@ MIN_TIME_MINUTES: float = 2.0     # мін час між мітками для �
 
 # ── Route Viewer API ─────────────────────────────────────────────────────────
 ROUTE_API_TOKEN: str = os.getenv("ROUTE_API_TOKEN", "")
+VIEWER_BASE_URL: str = os.getenv("VIEWER_BASE_URL", "").rstrip("/")
 
 # ── Планувальник звітів ───────────────────────────────────────────────────────
 DAILY_REPORT_HOUR: int = 20

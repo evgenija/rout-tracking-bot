@@ -10,7 +10,7 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.utils.keyboards import kb_driver_idle, kb_driver_active, kb_admin_driver_idle, kb_admin_driver_active
 
-from bot.config import ADMIN_IDS, SUPER_ADMIN_IDS, GROUP_CHAT_ID, MAX_DISTANCE_KM, MIN_TIME_MINUTES
+from bot.config import ADMIN_IDS, SUPER_ADMIN_IDS, GROUP_CHAT_ID, MAX_DISTANCE_KM, MIN_TIME_MINUTES, VIEWER_BASE_URL
 from bot.models.database import (
     add_waypoint,
     end_route,
@@ -428,9 +428,10 @@ async def handle_finish_odometer(message: Message, state: FSMContext, pg_pool=No
     if should_alert:
         admin_msg += f"\n\n⚠️ Велика розбіжність по маршруту {user_name} — перевір!"
 
-    _detail_kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🔍 Деталі маршруту", callback_data=f"route_detail:{route_id}")
-    ]])
+    _kb_row = [InlineKeyboardButton(text="🔍 Деталі маршруту", callback_data=f"route_detail:{route_id}")]
+    if VIEWER_BASE_URL:
+        _kb_row.append(InlineKeyboardButton(text="🗺 Карта", url=f"{VIEWER_BASE_URL}/route/{route_id}"))
+    _detail_kb = InlineKeyboardMarkup(inline_keyboard=[_kb_row])
     for admin_id in ADMIN_IDS:
         try:
             kb = _detail_kb if admin_id in SUPER_ADMIN_IDS else None
