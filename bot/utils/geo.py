@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 # Ключ: MD5 від округлених координат маршруту
 # Значення: відстань в км
 _route_distance_cache: dict = {}
+# Значення: overview_polyline.points (encoded polyline string або None)
+_polyline_cache: dict = {}
 
 # Лічильник API-запитів (скидається при рестарті, для логування)
 _api_call_count: int = 0
@@ -139,9 +141,10 @@ async def get_road_distance_for_route(waypoints: List[Dict]) -> float:
         status = data.get("status")
 
         if status == "OK":
+            route0 = data["routes"][0]
             total_meters = sum(
                 leg["distance"]["value"]
-                for leg in data["routes"][0]["legs"]
+                for leg in route0["legs"]
             )
             total_km = round(total_meters / 1000, 2)
             if total_km > 1000:
@@ -150,6 +153,7 @@ async def get_road_distance_for_route(waypoints: List[Dict]) -> float:
                     total_km, len(valid),
                 )
             _route_distance_cache[cache_key] = total_km
+            _polyline_cache[cache_key] = route0.get("overview_polyline", {}).get("points")
             logger.info(
                 "Google Directions API запит #%d: %d точок → %.2f км (дорогами)",
                 _api_call_count, len(valid), total_km,
@@ -170,6 +174,18 @@ async def get_road_distance_for_route(waypoints: List[Dict]) -> float:
 def get_api_call_count() -> int:
     """Поточний лічильник API-запитів (з моменту запуску бота)."""
     return _api_call_count
+
+
+def get_cached_polyline(waypoints: List[Dict]) -> str | None:
+    """Повертає overview_polyline з кешу для waypoints (якщо був API-запит в цьому сеансі).
+
+    Використовує той самий ключ що і get_road_distance_for_route().
+    Повертає None якщо запит не відбувся або API повернув помилку (fallback-шлях).
+    """
+    valid = [wp for wp in waypoints if not wp.get("is_suspicious")]
+    if len(valid) < 2:
+        return None
+    return _polyline_cache.get(_route_cache_key(valid))
 
 
 # ── GPS spoofing detection ────────────────────────────────────────────────────

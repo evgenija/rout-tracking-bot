@@ -30,7 +30,7 @@ from bot.models.database import (
     start_route,
 )
 from bot.services.diagnostics import diagnose_route
-from bot.utils.geo import get_road_distance_for_route
+from bot.utils.geo import get_road_distance_for_route, get_cached_polyline
 from bot.utils.geo import is_spike
 from bot.utils.geo import is_suspicious as check_suspicious
 from bot.utils.keyboards import kb_route_correction
@@ -297,6 +297,7 @@ async def handle_finish_location(message: Message, state: FSMContext):
     valid_fresh = [wp for wp in waypoints_fresh if not wp.get("is_suspicious")]
     if len(valid_fresh) >= 2:
         total_km = await get_road_distance_for_route(valid_fresh)
+    _cached_polyline = get_cached_polyline(valid_fresh if len(valid_fresh) >= 2 else waypoints_fresh)
     await state.update_data(
         finish_total_km=total_km,
         finish_waypoint_count=len(waypoints),
@@ -305,6 +306,7 @@ async def handle_finish_location(message: Message, state: FSMContext):
         finish_hm=_now_kyiv.strftime('%H:%M'),
         finish_date=_now_kyiv.strftime('%d.%m.%Y'),
         finish_end_time=now,
+        finish_polyline=_cached_polyline,
     )
     await state.set_state(OdometerState.waiting_for_finish_odometer)
     await message.answer(
@@ -330,6 +332,7 @@ async def handle_finish_odometer(message: Message, state: FSMContext, pg_pool=No
     end_time      = data.get("finish_end_time", get_kyiv_time().isoformat())
     is_adm        = data["finish_is_adm"]
     odometer_start = data.get("finish_odometer_start")
+    polyline_str  = data.get("finish_polyline")
 
     text = (message.text or "").strip().replace(",", ".")
     odometer_km = None
@@ -371,6 +374,12 @@ async def handle_finish_odometer(message: Message, state: FSMContext, pg_pool=No
                 logger.warning("Не вдалося надіслати діагностику адміну %d: %s", _admin_id, exc)
 
     await end_route(route_id, end_time, total_km)
+    try:
+        if polyline_str:
+            from bot.models.database import update_route_polyline
+            await update_route_polyline(route_id, polyline_str)
+    except Exception as _e:
+        logger.warning("polyline save failed for route %d: %s", route_id, _e)
     await save_odometer(route_id, odometer_km)
 
     # P2 hook — розрахунок вартості логістики

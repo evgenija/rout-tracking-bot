@@ -169,6 +169,14 @@ async def _auto_close_active_routes_inner(bot: Bot):
 
             total_km = await get_road_distance_for_route(waypoints)
             await end_route(route_id, finished_at, total_km)
+            try:
+                from bot.utils.geo import get_cached_polyline
+                from bot.models.database import update_route_polyline
+                _polyline = get_cached_polyline(waypoints)
+                if _polyline:
+                    await update_route_polyline(route_id, _polyline)
+            except Exception as _e:
+                logger.warning("polyline save failed for route %d: %s", route_id, _e)
 
             # Повідомлення водію
             try:
