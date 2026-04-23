@@ -9,8 +9,11 @@ async def get_route_json(route_id: int) -> dict | None:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT id, driver_id, start_time, end_time, total_km, "
-            "odometer_start, odometer_km, route_polyline FROM routes WHERE id = ?",
+            "SELECT r.id, r.driver_id, u.full_name AS driver_name, "
+            "r.start_time, r.end_time, r.total_km, "
+            "r.odometer_start, r.odometer_km, r.route_polyline "
+            "FROM routes r LEFT JOIN users u ON r.driver_id = u.telegram_id "
+            "WHERE r.id = ?",
             (route_id,),
         ) as cur:
             route = await cur.fetchone()
@@ -54,6 +57,7 @@ async def get_route_json(route_id: int) -> dict | None:
     return {
         "route_id": route["id"],
         "driver_id": route["driver_id"],
+        "driver_name": route["driver_name"],
         "start_time": route["start_time"],
         "end_time": route["end_time"],
         "total_km": route["total_km"],
