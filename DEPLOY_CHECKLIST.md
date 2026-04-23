@@ -13,10 +13,14 @@
 git status
 
 # 2. Import check зміненого модуля
-python3 -c "import bot.handlers.tracking"   # або інший змінений модуль
+python3 -c "import bot.handlers.tracking"
+python3 -c "import bot.utils.geo"
+python3 -c "import bot.utils.scheduler"
+python3 -c "import bot.models.database"
+python3 -c "import bot.services.route_api_service"
 
 # 3. Unit тести (не потребують Railway)
-python3 -m pytest tests/unit/ -v
+python3 -m pytest tests/ --ignore=tests/smoke_test.py -q
 ```
 
 ## Після деплою (Railway підхопив коміт)
@@ -39,10 +43,11 @@ cat tests/db_assert.py | railway ssh --native -- 'python3 /dev/stdin'
 |-----------|---------------------|
 | `git status` | Немає untracked файлів |
 | import check | Без помилок |
-| `pytest tests/unit/` | 11/12 PASS (1 known fail — database.py) |
+| `pytest tests/ --ignore=smoke_test.py` | 70/70 PASS |
 | smoke_test.py | 4/4 PASS після деплою |
-| db_assert.py | 18/18 OK |
-| Railway логи | Немає ERROR |
+| db_assert.py | 19/19 OK (включно з route_polyline) |
+| `curl /api/route/{id}` | JSON з route_id, waypoints, route_polyline |
+| Railway логи | Немає ERROR, є "Route API server started on port N" |
 
 ---
 
