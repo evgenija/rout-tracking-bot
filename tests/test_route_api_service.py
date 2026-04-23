@@ -55,6 +55,7 @@ def test_get_route_json_structure():
     mock_route = {
         "id": 42,
         "driver_id": 100,
+        "driver_name": "Іван Тестовий",
         "start_time": "2026-04-23T08:00:00",
         "end_time": "2026-04-23T17:00:00",
         "total_km": 153.5,
@@ -109,7 +110,8 @@ def test_get_route_json_structure():
 def test_get_route_json_null_polyline():
     """route_polyline=None (старий маршрут) → повертається без помилок."""
     mock_route = {
-        "id": 7, "driver_id": 5, "start_time": "2026-04-23T08:00:00",
+        "id": 7, "driver_id": 5, "driver_name": None,
+        "start_time": "2026-04-23T08:00:00",
         "end_time": "2026-04-23T12:00:00", "total_km": 80.0,
         "odometer_start": None, "odometer_km": None, "route_polyline": None,
     }
