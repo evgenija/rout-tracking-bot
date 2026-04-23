@@ -1,14 +1,17 @@
 import asyncio
+import json
 import logging
+import os
 
 import asyncpg
+from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from aiogram.types import BotCommand, BotCommandScopeChat
-from bot.config import BOT_NAME, BOT_TOKEN, ADMIN_IDS, SUPER_ADMIN_IDS
+from bot.config import BOT_NAME, BOT_TOKEN, ADMIN_IDS, SUPER_ADMIN_IDS, ROUTE_API_TOKEN
 from config_p2 import PG_DATABASE_URL
 from bot.services.db_init_p2 import create_p2_tables
 from bot.handlers import admin, auth, reports, tracking, ping_handler, debug_handler, route_detail_handler
@@ -24,6 +27,25 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+async def _handle_route_api(request: web.Request) -> web.Response:
+    auth = request.headers.get("Authorization", "")
+    if not ROUTE_API_TOKEN or auth != f"Bearer {ROUTE_API_TOKEN}":
+        return web.Response(status=401, text="Unauthorized")
+    try:
+        route_id = int(request.match_info["route_id"])
+    except ValueError:
+        return web.Response(status=400, text="Invalid route_id")
+    from bot.services.route_api_service import get_route_json
+    data = await get_route_json(route_id)
+    if data is None:
+        return web.Response(status=404, text="Route not found")
+    return web.Response(
+        status=200,
+        content_type="application/json",
+        body=json.dumps(data, ensure_ascii=False),
+    )
 
 
 async def main():
@@ -73,6 +95,18 @@ async def main():
             await bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=admin_id))
         except Exception:
             pass
+
+    web_app = web.Application()
+    web_app.router.add_get("/api/route/{route_id}", _handle_route_api)
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    port = int(os.getenv("PORT", "8080"))
+    try:
+        site = web.TCPSite(runner, "0.0.0.0", port)
+        await site.start()
+        logger.info("Route API server started on port %d", port)
+    except Exception as exc:
+        logger.warning("Route API server failed to start: %s — продовжую без API", exc)
 
     logger.info("Бот запущено. Починаю polling...")
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())

@@ -36,6 +36,9 @@ GOOGLE_MAPS_API_KEY: str = os.getenv("GOOGLE_MAPS_API_KEY", "")
 MAX_DISTANCE_KM: float = 130.0    # макс відстань між двома мітками (понад — телепортація)
 MIN_TIME_MINUTES: float = 2.0     # мін час між мітками для оцінки швидкості
 
+# ── Route Viewer API ─────────────────────────────────────────────────────────
+ROUTE_API_TOKEN: str = os.getenv("ROUTE_API_TOKEN", "")
+
 # ── Планувальник звітів ───────────────────────────────────────────────────────
 DAILY_REPORT_HOUR: int = 20
 DAILY_REPORT_MINUTE: int = 0
