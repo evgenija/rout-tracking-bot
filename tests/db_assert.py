@@ -42,7 +42,8 @@ for table in EXPECTED_TABLES:
 
 # Критичні колонки routes
 ROUTES_COLUMNS = ["id", "driver_id", "start_time", "end_time",
-                  "total_km", "is_active", "odometer_start", "odometer_km"]
+                  "total_km", "is_active", "odometer_start", "odometer_km",
+                  "route_polyline"]
 
 if "routes" in existing_tables:
     cur.execute("PRAGMA table_info(routes)")
