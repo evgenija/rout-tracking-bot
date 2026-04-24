@@ -3,6 +3,7 @@ p2_report_service.py — читає агреговані дані з P2 daily_in
 Не залежить від P1 SQLite, aiogram або telegram.
 """
 import logging
+from datetime import date as _date
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,7 @@ async def get_p2_daily_by_date(pg_pool, date_str: str) -> dict:
     if pg_pool is None:
         return {}
     try:
+        date_obj = _date.fromisoformat(date_str)
         async with pg_pool.acquire() as conn:
             rows = await conn.fetch(
                 """
@@ -26,7 +28,7 @@ async def get_p2_daily_by_date(pg_pool, date_str: str) -> dict:
                 WHERE date = $1
                 GROUP BY driver_id
                 """,
-                date_str,
+                date_obj,
             )
         return {
             row["driver_id"]: {
@@ -49,6 +51,8 @@ async def get_p2_weekly_by_range(pg_pool, start_date: str, end_date: str) -> dic
     if pg_pool is None:
         return {}
     try:
+        start_obj = _date.fromisoformat(start_date)
+        end_obj   = _date.fromisoformat(end_date)
         async with pg_pool.acquire() as conn:
             rows = await conn.fetch(
                 """
@@ -61,7 +65,7 @@ async def get_p2_weekly_by_range(pg_pool, start_date: str, end_date: str) -> dic
                 GROUP BY driver_id, date
                 ORDER BY driver_id, date
                 """,
-                start_date, end_date,
+                start_obj, end_obj,
             )
         result: dict = {}
         for row in rows:
