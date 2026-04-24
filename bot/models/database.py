@@ -792,6 +792,34 @@ async def get_routes_in_date_range(date_from: str, date_to: str) -> List[Dict]:
             return [dict(r) for r in rows]
 
 
+async def get_weekly_odo_by_day(start_date: str, end_date: str) -> dict:
+    """
+    Повертає {driver_id: {day: odo_km}} — пробіг за одометром per-driver per-day.
+    Рахує тільки маршрути де обидва odometer_start і odometer_km є і diff > 0.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """
+            SELECT r.driver_id,
+                   DATE(r.start_time) AS day,
+                   SUM(r.odometer_km - r.odometer_start) AS odo_km
+            FROM routes r
+            WHERE DATE(r.start_time) BETWEEN ? AND ?
+              AND r.odometer_start IS NOT NULL
+              AND r.odometer_km IS NOT NULL
+              AND (r.odometer_km - r.odometer_start) > 0
+            GROUP BY r.driver_id, DATE(r.start_time)
+            """,
+            (start_date, end_date),
+        ) as cur:
+            rows = await cur.fetchall()
+    result: dict = {}
+    for row in rows:
+        result.setdefault(row["driver_id"], {})[row["day"]] = row["odo_km"]
+    return result
+
+
 async def get_weekly_stats(start_date: str, end_date: str) -> List[Dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row

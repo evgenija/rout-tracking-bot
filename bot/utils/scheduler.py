@@ -14,15 +14,20 @@ from bot.config import (
     DAILY_REPORT_MINUTE,
     GROUP_CHAT_ID,
     WEEKLY_REPORT_WEEKDAY,
+    WEEKLY_REPORT_HOUR,
 )
 from bot.models.database import (
     get_daily_stats,
     get_weekly_stats,
+    get_weekly_stats_by_day,
+    get_weekly_odo_by_day,
     get_all_active_routes_today,
     get_route_waypoints,
     end_route,
 )
 from bot.utils.geo import format_duration
+from bot.services.p2_report_service import get_p2_daily_by_date, format_payment_line, get_p2_weekly_by_range
+from bot.services.weekly_report_service import format_weekly_report
 
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler(timezone="Europe/Kyiv")
@@ -49,26 +54,30 @@ def _odo_accuracy_block(total_km: float, odo_start, odo_finish) -> str:
     )
 
 
-async def send_daily_report(bot: Bot):
+async def send_daily_report(bot: Bot, pg_pool=None):
     try:
         today = get_kyiv_time().date().isoformat()
         stats = await get_daily_stats(today)
+        p2    = await get_p2_daily_by_date(pg_pool, today)
 
         if not stats:
             text = f"📊 Щоденний звіт за {today}\n\nНемає активних маршрутів."
         else:
             lines = [f"📊 Щоденний звіт за {today}\n"]
             for s in stats:
-                duration = format_duration(s["first_start"], s["last_end"])
-                total_km = s["total_km"]
-                wcount   = s.get("waypoint_count", 0)
+                duration  = format_duration(s["first_start"], s["last_end"])
+                total_km  = s["total_km"]
+                wcount    = s.get("waypoint_count", 0)
+                p2_entry  = p2.get(s["telegram_id"])
+                km_display = p2_entry["km"] if p2_entry else total_km
                 base = (
                     f"👤 {s['full_name']}\n"
-                    f"🛣 {total_km:.1f} км | {wcount} точок\n"
+                    f"🛣 {km_display:.1f} км | {wcount} точок\n"
                     f"⏱ {duration}"
                 )
-                odo_block = _odo_accuracy_block(total_km, s.get("odo_start"), s.get("odo_finish"))
-                lines.append(f"{base}\n{odo_block}")
+                odo_block     = _odo_accuracy_block(total_km, s.get("odo_start"), s.get("odo_finish"))
+                payment_line  = format_payment_line(p2_entry)
+                lines.append(f"{base}\n{odo_block}\n{payment_line}")
             text = "\n\n".join(lines)
 
         for admin_id in ADMIN_IDS:
@@ -85,26 +94,18 @@ async def send_daily_report(bot: Bot):
                 pass
 
 
-async def send_weekly_report(bot: Bot):
+async def send_weekly_report(bot: Bot, pg_pool=None):
     try:
-        today = get_kyiv_time().date()
-        # Тиждень: з попереднього понеділка по сьогодні
-        week_start = (today - timedelta(days=today.weekday() + 1)).isoformat()
-        week_end = today.isoformat()
+        today      = get_kyiv_time().date()
+        week_start = today - timedelta(days=today.weekday() + 1)  # пн минулого тижня
+        week_end   = today
 
-        stats = await get_weekly_stats(week_start, week_end)
+        p1_stats  = await get_weekly_stats(week_start.isoformat(), week_end.isoformat())
+        p1_by_day = await get_weekly_stats_by_day(week_start.isoformat(), week_end.isoformat())
+        p1_odo    = await get_weekly_odo_by_day(week_start.isoformat(), week_end.isoformat())
+        p2_weekly = await get_p2_weekly_by_range(pg_pool, week_start.isoformat(), week_end.isoformat())
 
-        if not stats:
-            text = f"📊 Тижневий звіт ({week_start} — {week_end})\n\nНемає даних."
-        else:
-            lines = [f"📊 Тижневий звіт ({week_start} — {week_end})\n"]
-            grand_total = 0.0
-            for s in stats:
-                km = s["total_km"] or 0.0
-                lines.append(f"👤 {s['full_name']}: {km:.1f} км ({s['route_count']} маршрутів)")
-                grand_total += km
-            lines.append(f"\n🏁 Grand Total: {grand_total:.1f} км")
-            text = "\n".join(lines)
+        text = format_weekly_report(p1_stats, p1_by_day, p1_odo, p2_weekly, week_start, week_end)
 
         for admin_id in ADMIN_IDS:
             try:
@@ -345,18 +346,18 @@ async def check_active_route_gaps(bot: Bot) -> None:
                 pass
 
 
-def setup_scheduler(bot: Bot):
+def setup_scheduler(bot: Bot, pg_pool=None):
     scheduler.add_job(
         send_daily_report,
         CronTrigger(hour=DAILY_REPORT_HOUR, minute=DAILY_REPORT_MINUTE),
-        args=[bot],
+        args=[bot, pg_pool],
         id="daily_report",
         replace_existing=True,
     )
     scheduler.add_job(
         send_weekly_report,
-        CronTrigger(day_of_week=WEEKLY_REPORT_WEEKDAY, hour=DAILY_REPORT_HOUR, minute=DAILY_REPORT_MINUTE),
-        args=[bot],
+        CronTrigger(day_of_week=WEEKLY_REPORT_WEEKDAY, hour=WEEKLY_REPORT_HOUR, minute=0),
+        args=[bot, pg_pool],
         id="weekly_report",
         replace_existing=True,
     )

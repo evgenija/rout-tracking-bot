@@ -30,6 +30,7 @@ from bot.models.database import (
     start_route,
 )
 from bot.services.diagnostics import diagnose_route
+from bot.services.route_comment_service import get_route_comment
 from bot.utils.geo import get_road_distance_for_route, get_cached_polyline
 from bot.utils.geo import is_spike
 from bot.utils.geo import is_suspicious as check_suspicious
@@ -413,6 +414,11 @@ async def handle_finish_odometer(message: Message, state: FSMContext, pg_pool=No
 
     odo_section, should_alert = _format_odometer_accuracy(total_km, odometer_start, odometer_km)
 
+    _odo_diff = None
+    if odometer_km is not None and odometer_start is not None and odometer_km > odometer_start:
+        _odo_diff = odometer_km - odometer_start
+    _comment = get_route_comment(user_name, _odo_diff, total_km)
+
     summary = (
         f"🏁 Маршрут #{route_id} завершено!\n\n"
         f"👤 {user_name}\n"
@@ -421,6 +427,8 @@ async def handle_finish_odometer(message: Message, state: FSMContext, pg_pool=No
         f"🕐 {start_hm} → {finish_hm}  {finish_date}\n\n"
         f"{odo_section}"
     )
+    if _comment:
+        summary += f"\n\n{_comment}"
 
     await message.answer(summary, reply_markup=kb_admin_driver_idle() if is_adm else kb_driver_idle())
 

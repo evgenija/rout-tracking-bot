@@ -85,7 +85,7 @@ async def main():
     dp.include_router(debug_handler.debug_router)
     dp.include_router(route_detail_handler.route_detail_router)
 
-    setup_scheduler(bot)
+    setup_scheduler(bot, pg_pool=dp.get("pg_pool"))
 
     admin_commands = [
         BotCommand(command="remind_ios", description="Нагадування водію про геолокацію iOS"),

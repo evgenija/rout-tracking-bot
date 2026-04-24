@@ -9,6 +9,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery
 
 from bot.config import ADMIN_IDS, SUPER_ADMIN_IDS, COMPANY_NAME, MAX_DISTANCE_KM
+from bot.services.p2_report_service import get_p2_daily_by_date, format_payment_line, get_p2_weekly_by_range
+from bot.services.weekly_report_service import format_weekly_report
 from bot.models.database import (
     delete_user,
     get_all_users,
@@ -16,6 +18,7 @@ from bot.models.database import (
     get_daily_stats,
     get_weekly_stats,
     get_weekly_stats_by_day,
+    get_weekly_odo_by_day,
     get_route_info,
     get_route_waypoints,
     get_route_correction_state,
@@ -89,7 +92,7 @@ async def btn_finance(message: Message):
 # ── Inline callbacks: звіти ───────────────────────────────────────────────────
 
 @router.callback_query(F.data == "rpt:daily")
-async def cb_daily(callback: CallbackQuery):
+async def cb_daily(callback: CallbackQuery, pg_pool=None):
     if not is_admin(callback.from_user.id):
         await callback.answer("Недостатньо прав.", show_alert=True)
         return
@@ -97,6 +100,7 @@ async def cb_daily(callback: CallbackQuery):
 
     today = get_kyiv_time().date().isoformat()
     stats = await get_daily_stats(today)
+    p2    = await get_p2_daily_by_date(pg_pool, today)
 
     if not stats:
         await callback.message.answer(f"📊 Щоденний звіт за {today}\n\nНемає активних маршрутів.")
@@ -104,82 +108,37 @@ async def cb_daily(callback: CallbackQuery):
 
     lines = [f"📊 Щоденний звіт за {today}\n"]
     for s in stats:
-        duration = format_duration(s["first_start"], s["last_end"])
+        duration     = format_duration(s["first_start"], s["last_end"])
+        p2_entry     = p2.get(s["telegram_id"])
+        km_display   = p2_entry["km"] if p2_entry else s["total_km"]
+        payment_line = format_payment_line(p2_entry)
         lines.append(
             f"👤 {s['full_name']}\n"
-            f"   🛣 {s['total_km']:.1f} км | {s['waypoint_count']} точок\n"
-            f"   ⏱ {duration}"
+            f"   🛣 {km_display:.1f} км | {s['waypoint_count']} точок\n"
+            f"   ⏱ {duration}\n"
+            f"   {payment_line}"
         )
     await callback.message.answer("\n\n".join(lines))
 
 
 @router.callback_query(F.data == "rpt:weekly")
-async def cb_weekly(callback: CallbackQuery):
+async def cb_weekly(callback: CallbackQuery, pg_pool=None):
     if not is_admin(callback.from_user.id):
         await callback.answer("Недостатньо прав.", show_alert=True)
         return
     await callback.answer()
 
-    today           = get_kyiv_time().date()
-    week_start_date = today - timedelta(days=today.weekday())
-    week_start      = week_start_date.isoformat()
-    week_end        = today.isoformat()
-    stats           = await get_weekly_stats(week_start, week_end)
+    today      = get_kyiv_time().date()
+    week_start = today - timedelta(days=today.weekday())
+    week_end   = today
 
-    # Per-driver per-day breakdown (diagnostic + display)
-    day_breakdown = await get_weekly_stats_by_day(week_start, week_end)
-    by_driver_day: dict[int, dict[str, dict]] = {}
-    by_driver_log: dict[str, list] = {}
-    for row in day_breakdown:
-        by_driver_day.setdefault(row["driver_id"], {})[row["day"]] = {
-            "km":         row["km"],
-            "has_manual": bool(row.get("has_manual", 0)),
-        }
-        by_driver_log.setdefault(row["full_name"], []).append(row)
-    for drv, days in by_driver_log.items():
-        day_parts = ", ".join(
-            f"{d['day']}={d['km']:.1f}km/{d['waypoint_count']}pts({d['route_count']}routes)"
-            for d in days
-        )
-        logger.info("[weekly] %s: %s | total=%.1fkm/%dpts",
-                    drv, day_parts,
-                    sum(d["km"] for d in days),
-                    sum(d["waypoint_count"] for d in days))
+    p1_stats  = await get_weekly_stats(week_start.isoformat(), week_end.isoformat())
+    p1_by_day = await get_weekly_stats_by_day(week_start.isoformat(), week_end.isoformat())
+    p1_odo    = await get_weekly_odo_by_day(week_start.isoformat(), week_end.isoformat())
+    p2_weekly = await get_p2_weekly_by_range(pg_pool, week_start.isoformat(), week_end.isoformat())
 
-    if not stats:
-        await callback.message.answer(f"📊 Тижневий звіт ({week_start} — {week_end})\n\nНемає даних.")
-        return
-
-    UA_DAYS   = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"]
-    week_days = [week_start_date + timedelta(days=i) for i in range(7)]
-
-    header = f"📊 Тижневий звіт ({week_start} — {week_end})"
-    driver_blocks   = []
-    grand_total_km  = 0.0
-    grand_total_pts = 0
-
-    for s in stats:
-        km          = s["total_km"] or 0.0
-        wp          = s["waypoint_count"] or 0
-        driver_days = by_driver_day.get(s["telegram_id"], {})
-        drv_manual  = bool(s.get("has_manual", 0))
-
-        rows = [f"👤 {s['full_name']}"]
-        for d in week_days:
-            day_data  = driver_days.get(d.isoformat(), {"km": 0.0, "has_manual": False})
-            day_km    = day_data["km"]
-            day_label = f"{UA_DAYS[d.weekday()]} {d.strftime('%d.%m')}"
-            manual_mark = " ✏️" if day_data["has_manual"] else ""
-            rows.append(f"📅 {day_label} — {day_km:.1f} км{manual_mark}")
-        total_mark = " ✏️" if drv_manual else ""
-        rows.append(f"🛣 Тотал: {km:.1f} км{total_mark} | {wp} точок")
-        driver_blocks.append("\n".join(rows))
-        grand_total_km  += km
-        grand_total_pts += wp
-
-    body  = "\n\n─────────────────\n\n".join(driver_blocks)
-    grand = f"━━━━━━━━━━━━━━━━━\n📊 GRAND TOTAL: {grand_total_km:.1f} км | {grand_total_pts} точок"
-    await callback.message.answer(f"{header}\n\n{body}\n\n{grand}")
+    text = format_weekly_report(p1_stats, p1_by_day, p1_odo, p2_weekly, week_start, week_end)
+    await callback.message.answer(text)
 
 
 # ── Inline callbacks: водії ───────────────────────────────────────────────────

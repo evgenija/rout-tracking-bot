@@ -44,3 +44,4 @@ VIEWER_BASE_URL: str = os.getenv("VIEWER_BASE_URL", "").rstrip("/")
 DAILY_REPORT_HOUR: int = 20
 DAILY_REPORT_MINUTE: int = 0
 WEEKLY_REPORT_WEEKDAY: str = "sun"   # APScheduler: sun=неділя
+WEEKLY_REPORT_HOUR: int = 13         # 13:00 Kyiv — зручно для власника
