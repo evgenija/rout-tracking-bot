@@ -143,9 +143,9 @@ async def send_driver_reminder(bot: Bot):
                 pass
 
 
-async def auto_close_active_routes(bot: Bot):
+async def auto_close_active_routes(bot: Bot, pg_pool=None):
     try:
-        await _auto_close_active_routes_inner(bot)
+        await _auto_close_active_routes_inner(bot, pg_pool)
     except Exception as e:
         logger.error("Scheduler job auto_close_active_routes failed: %s", e)
         for admin_id in list(set(ADMIN_IDS + SUPER_ADMIN_IDS)):
@@ -155,7 +155,7 @@ async def auto_close_active_routes(bot: Bot):
                 pass
 
 
-async def _auto_close_active_routes_inner(bot: Bot):
+async def _auto_close_active_routes_inner(bot: Bot, pg_pool=None):
     from bot.utils.geo import get_road_distance_for_route
     active_routes = await get_all_active_routes_today()
     for route in active_routes:
@@ -178,6 +178,27 @@ async def _auto_close_active_routes_inner(bot: Bot):
                     await update_route_polyline(route_id, _polyline)
             except Exception as _e:
                 logger.warning("polyline save failed for route %d: %s", route_id, _e)
+
+            # P2 hook — без одометра фінішу (авто-закриття)
+            if pg_pool:
+                try:
+                    from bot.services.route_cost_service import on_route_finished, get_driver_type
+                    from bot.services.coefficients_service import CoefficientsService
+                    _driver_type = get_driver_type(route["telegram_id"])
+                    _coefficients = await CoefficientsService(pg_pool).get()
+                    await on_route_finished(
+                        route_id=route_id,
+                        driver_id=route["telegram_id"],
+                        driver_type=_driver_type,
+                        tracking_km=float(total_km) if total_km else 0.0,
+                        odometer_km=None,
+                        driver_name=route["full_name"],
+                        coefficients=_coefficients,
+                        pg_pool=pg_pool,
+                        bot=bot,
+                    )
+                except Exception as _e:
+                    logger.warning("P2 route cost hook failed (auto-close) route #%d: %s", route_id, _e)
 
             # Повідомлення водію
             try:
@@ -371,7 +392,7 @@ def setup_scheduler(bot: Bot, pg_pool=None):
     scheduler.add_job(
         auto_close_active_routes,
         CronTrigger(hour=23, minute=59),
-        args=[bot],
+        args=[bot, pg_pool],
         id="auto_close_routes",
         replace_existing=True,
     )
