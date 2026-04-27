@@ -9,8 +9,10 @@ from datetime import date
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-
+from aiogram.types import (
+    Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
+    InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery,
+)
 from aiogram.filters import Command
 
 from config_p2 import SUPER_ADMIN_IDS
@@ -50,6 +52,15 @@ _cancel_kb = ReplyKeyboardMarkup(
     resize_keyboard=True,
     one_time_keyboard=True,
 )
+
+
+def _delete_kb(target_date: date) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="🗑 Видалити цей запис",
+            callback_data=f"fin_del:{target_date.isoformat()}",
+        )
+    ]])
 
 
 @router.message(F.text == "💰 Фін модель")
@@ -132,7 +143,6 @@ async def process_sales_km(message: Message, state: FSMContext):
     revenue    = data["revenue"]
     input_date = date.fromisoformat(data["input_date"])
 
-    # Зберігаємо в period_input
     saved = await save_period_input(
         pg_pool=_pg_pool,
         date_from=input_date,
@@ -144,12 +154,11 @@ async def process_sales_km(message: Message, state: FSMContext):
     if not saved:
         await message.answer(
             "❌ Помилка збереження. Можливо, виручка за цю дату вже введена.\n"
-            "Перевір /finance_list або зверніться до адміна.",
+            "Переглянь список через 💰 Фін модель → /finance_list",
             reply_markup=ReplyKeyboardRemove(),
         )
         return
 
-    # Розраховуємо і показуємо звіт
     try:
         coefficients = await _coeff_service.get()
         result = await get_daily_op_result(_pg_pool, input_date, coefficients)
@@ -160,16 +169,19 @@ async def process_sales_km(message: Message, state: FSMContext):
                 "⚠️ Не вдалося розрахувати Op.Profit — перевірте дані доставки.",
                 reply_markup=ReplyKeyboardRemove(),
             )
+            await message.answer(
+                "Якщо дані введені помилково — видали запис кнопкою нижче та введи знову.",
+                reply_markup=_delete_kb(input_date),
+            )
             return
 
         report_text = format_daily_op_report(result)
 
-        # Попередження якщо sales_km = 0 — повідомити всіх super-admin
         if sales_km == 0:
             alert = (
                 f"⚠️ Sales км = 0 за {input_date.strftime('%d.%m.%Y')}\n"
                 f"Операційний прибуток може бути завищений.\n"
-                f"Якщо sales-менеджери їздили — введи /set_sales_km {input_date.isoformat()} <км>"
+                f"Якщо sales-менеджери їздили — відкрий /finance_list і виправ запис."
             )
             for admin_id in SUPER_ADMIN_IDS:
                 if admin_id != message.from_user.id:
@@ -180,8 +192,12 @@ async def process_sales_km(message: Message, state: FSMContext):
                         pass
 
         await message.answer(
-            report_text + f"\n\n🗑 Помилка у введених даних? /finance_delete {input_date.isoformat()}",
+            report_text,
             reply_markup=ReplyKeyboardRemove(),
+        )
+        await message.answer(
+            "Якщо дані введені помилково — видали запис кнопкою нижче та введи знову.",
+            reply_markup=_delete_kb(input_date),
         )
 
     except Exception as e:
@@ -195,7 +211,6 @@ async def process_sales_km(message: Message, state: FSMContext):
 
 @router.message(Command("finance_list"))
 async def cmd_finance_list(message: Message):
-    """Показує всі записи period_input за останні 14 днів."""
     if not _is_super_admin(message.from_user.id):
         return
     if _pg_pool is None:
@@ -205,7 +220,7 @@ async def cmd_finance_list(message: Message):
         async with _pg_pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT date_from, date_to, revenue, sales_km, created_at
+                SELECT date_from, date_to, revenue, sales_km
                 FROM period_input
                 WHERE date_from >= CURRENT_DATE - INTERVAL '14 days'
                 ORDER BY date_from DESC
@@ -214,78 +229,75 @@ async def cmd_finance_list(message: Message):
         if not rows:
             await message.answer("📋 Записів за останні 14 днів немає.")
             return
-        lines = ["📋 Введена виручка (14 днів):"]
+
+        await message.answer("📋 Введена виручка (14 днів):")
+
         for r in rows:
             d_from = r["date_from"].strftime("%d.%m")
             d_to   = r["date_to"].strftime("%d.%m.%Y")
             period = d_from if r["date_from"] == r["date_to"] else f"{d_from}–{d_to}"
-            lines.append(
-                f"📅 {period} | 💰 {r['revenue']:,} грн | 🚗 {r['sales_km']} км"
-                f"\n   /finance_delete {r['date_from'].isoformat()}"
+            revenue_fmt = f"{r['revenue']:,}".replace(",", " ")
+            await message.answer(
+                f"📅 {period} | 💰 {revenue_fmt} грн | 🚗 {r['sales_km']} км",
+                reply_markup=_delete_kb(r["date_from"]),
             )
-        await message.answer("\n\n".join(lines).replace(",", " "))
+
     except Exception as e:
         logger.exception("finance_list failed: %s", e)
         await message.answer(f"⚠️ Помилка: {e}")
 
 
-@router.message(Command("finance_delete"))
-async def cmd_finance_delete(message: Message):
-    """Видаляє запис period_input за датою. Використання: /finance_delete 2026-04-27"""
-    if not _is_super_admin(message.from_user.id):
+@router.callback_query(F.data.startswith("fin_del:"))
+async def cb_finance_delete(callback: CallbackQuery):
+    if not _is_super_admin(callback.from_user.id):
+        await callback.answer("⛔ Немає доступу.", show_alert=True)
         return
     if _pg_pool is None:
-        await message.answer("⚠️ БД недоступна.")
+        await callback.answer("⚠️ БД недоступна.", show_alert=True)
         return
 
-    parts = message.text.strip().split()
-    if len(parts) < 2:
-        await message.answer(
-            "Використання: /finance_delete YYYY-MM-DD\n"
-            "Наприклад: /finance_delete 2026-04-27\n\n"
-            "Переглянути всі записи: /finance_list"
-        )
-        return
-
+    date_str = callback.data.removeprefix("fin_del:")
     try:
-        target_date = date.fromisoformat(parts[1])
+        target_date = date.fromisoformat(date_str)
     except ValueError:
-        await message.answer("❌ Невірний формат дати. Використовуй: YYYY-MM-DD\nНаприклад: 2026-04-27")
+        await callback.answer("❌ Невірна дата.", show_alert=True)
         return
 
     try:
         async with _pg_pool.acquire() as conn:
-            # Показати що буде видалено — перед видаленням
             row = await conn.fetchrow(
                 "SELECT revenue, sales_km, date_from, date_to FROM period_input "
                 "WHERE date_from <= $1 AND date_to >= $1",
                 target_date,
             )
             if row is None:
-                await message.answer(
-                    f"❌ Запис за {target_date.strftime('%d.%m.%Y')} не знайдено.\n"
-                    f"Переглянути всі записи: /finance_list"
+                await callback.answer(
+                    f"Запис за {target_date.strftime('%d.%m.%Y')} вже видалено або не існує.",
+                    show_alert=True,
                 )
+                await callback.message.edit_reply_markup(reply_markup=None)
                 return
 
-            d_from = row["date_from"].strftime("%d.%m")
-            d_to   = row["date_to"].strftime("%d.%m.%Y")
-            period = d_from if row["date_from"] == row["date_to"] else f"{d_from}–{d_to}"
-
-            deleted = await conn.execute(
+            await conn.execute(
                 "DELETE FROM period_input WHERE date_from <= $1 AND date_to >= $1",
                 target_date,
             )
 
-        await message.answer(
-            f"🗑 Видалено запис за {period}:\n"
-            f"💰 {row['revenue']:,} грн | 🚗 {row['sales_km']} км\n\n"
-            f"Тепер можеш ввести правильні дані через 💰 Фін модель.".replace(",", " ")
+        d_from = row["date_from"].strftime("%d.%m")
+        d_to   = row["date_to"].strftime("%d.%m.%Y")
+        period = d_from if row["date_from"] == row["date_to"] else f"{d_from}–{d_to}"
+        revenue_fmt = f"{row['revenue']:,}".replace(",", " ")
+
+        await callback.message.edit_text(
+            f"🗑 Видалено: {period} | {revenue_fmt} грн | {row['sales_km']} км\n"
+            f"Введи знову через 💰 Фін модель.",
         )
+        await callback.answer("Видалено ✅")
         logger.info(
-            "finance_delete: user=%d deleted period_input for %s",
-            message.from_user.id, target_date,
+            "fin_del callback: user=%d deleted period_input for %s",
+            callback.from_user.id, target_date,
         )
+
     except Exception as e:
-        logger.exception("finance_delete failed: %s", e)
-        await message.answer(f"⚠️ Помилка видалення: {e}")
+        logger.exception("fin_del callback failed: %s", e)
+        await callback.answer(f"⚠️ Помилка: {e}", show_alert=True)
