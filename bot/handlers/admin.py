@@ -816,3 +816,64 @@ async def cb_remind_ios(callback: CallbackQuery):
     except Exception as e:
         await callback.answer("❌ Помилка відправки", show_alert=True)
         logger.error("remind_ios: failed to send to driver=%d: %s", driver_id, e)
+
+
+@router.message(Command("set_fuel"))
+async def cmd_set_fuel(message: Message, pg_pool=None):
+    """Оновити ціни на пальне вручну. Тільки super-admin.
+    Використання: /set_fuel <ціна_А95> <ціна_LPG>
+    Приклад: /set_fuel 74.50 50.20
+    """
+    if message.from_user.id not in SUPER_ADMIN_IDS:
+        await message.answer("❌ Тільки для super-admin.")
+        return
+
+    parts = (message.text or "").split()
+    if len(parts) != 3:
+        await message.answer(
+            "Використання: /set_fuel <ціна_А95> <ціна_LPG>\n"
+            "Приклад: /set_fuel 74.50 50.20"
+        )
+        return
+
+    try:
+        a95 = float(parts[1])
+        lpg = float(parts[2])
+    except ValueError:
+        await message.answer("❌ Ціни повинні бути числами. Приклад: /set_fuel 74.50 50.20")
+        return
+
+    if not (10 < a95 < 300 and 10 < lpg < 300):
+        await message.answer("❌ Неправильні значення. Очікується від 10 до 300 грн/л.")
+        return
+
+    if not pg_pool:
+        await message.answer("❌ pg_pool недоступний.")
+        return
+
+    async with pg_pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE coefficients SET value=$1, updated_at=NOW() WHERE key='fuel_price_a95'", a95
+        )
+        await conn.execute(
+            "UPDATE coefficients SET value=$1, updated_at=NOW() WHERE key='fuel_price_lpg'", lpg
+        )
+
+    # Скинути кеш через shared instance
+    from bot.utils.scheduler import _shared_coeff_service
+    from bot.services.coefficients_service import CoefficientsService
+    svc = _shared_coeff_service or CoefficientsService(pg_pool)
+    await svc.refresh()
+    coeffs = await svc.get()
+    new_cost = coeffs.get("sales_cost_per_km", 0)
+
+    await message.answer(
+        f"✅ Ціни на пальне оновлено:\n"
+        f"А-95: {a95:.2f} грн/л\n"
+        f"LPG: {lpg:.2f} грн/л\n"
+        f"→ sales_cost_per_km = {new_cost:.2f} грн/км"
+    )
+    logger.info(
+        "set_fuel: A95=%.2f LPG=%.2f cost/km=%.4f by admin=%d",
+        a95, lpg, new_cost, message.from_user.id,
+    )

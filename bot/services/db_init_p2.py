@@ -60,3 +60,19 @@ async def create_p2_tables(pool):
             VALUES ('tracking_over_odometer_threshold', 0.03, 'Поріг: трекінг > одометр. Перевищення → рахуємо за одометром')
             ON CONFLICT (key) DO NOTHING
         """)
+        # Фінансові коефіцієнти — ON CONFLICT DO NOTHING: не перезаписувати актуальні значення
+        for key, value, desc in [
+            ("monthly_shared",           292555.0, "Загальні витрати/міс (медіана 2025, грн)"),
+            ("monthly_taxes",             14549.0, "Податки/міс (медіана 2025, грн)"),
+            ("sales_salary_pct",           0.035,  "Частка виручки на зарплату sales managers"),
+            ("fuel_price_a95",             72.71,  "Ціна А-95 грн/л (авто або /set_fuel)"),
+            ("fuel_price_lpg",             48.99,  "Ціна LPG грн/л (авто або /set_fuel)"),
+            ("fuel_consumption_a95",        7.0,   "Витрата А-95 л/100км (sales managers)"),
+            ("fuel_consumption_lpg",       10.0,   "Витрата LPG л/100км (sales managers)"),
+            ("sales_amortization_per_km",   0.80,  "Амортизація авто sales managers грн/км"),
+        ]:
+            await conn.execute(
+                "INSERT INTO coefficients (key, value, description) VALUES ($1, $2, $3) "
+                "ON CONFLICT (key) DO NOTHING",
+                key, value, desc
+            )

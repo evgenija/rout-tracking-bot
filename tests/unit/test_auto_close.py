@@ -42,3 +42,25 @@ def test_get_all_active_routes_today_should_include_odometer_start():
         "get_all_active_routes_today не включає odometer_start у SELECT — "
         "потрібно оновити database.py і auto_close_active_routes"
     )
+
+
+def test_route_without_odometer_gets_correct_message():
+    """auto_close: маршрут без odometer_start → повідомлення 'Одометр не вводився'."""
+    path = _find_file("bot", "utils", "scheduler.py")
+    assert path, "scheduler.py не знайдено"
+    source = open(path, encoding="utf-8").read()
+    assert "Одометр не вводився" in source, (
+        "auto_close має надсилати 'Одометр не вводився — порівняння недоступне' "
+        "коли odometer_start відсутній"
+    )
+
+
+def test_auto_close_uses_is_active_not_status():
+    """Regression b4ef9f5: auto_close використовує is_active=1, не status='active'."""
+    path = _find_file("bot", "utils", "scheduler.py")
+    assert path, "scheduler.py не знайдено"
+    source = open(path, encoding="utf-8").read()
+    assert "is_active = 1" in source, \
+        "scheduler.py має використовувати is_active=1 у запиті активних маршрутів"
+    assert "status = 'active'" not in source and "status='active'" not in source, \
+        "Знайдено баг: status='active' — потрібно is_active=1 (commit b4ef9f5)"

@@ -34,3 +34,30 @@ def test_avg_speed_threshold_is_25():
 
 def test_speed_anomaly_threshold_is_150():
     assert SPEED_ANOMALY_KMH == 150.0
+
+
+# ── Правило 2.1 — відображення розбіжності в P1-звіті ─────────────────────────
+
+def test_odometer_diff_shown_in_report():
+    """Розбіжність завжди відображається в P1-звіті при наявності обох показників одометра."""
+    from bot.handlers.tracking import _format_odometer_accuracy
+    text, _ = _format_odometer_accuracy(85.0, 0.0, 100.0)  # diff_pct=15%
+    assert "Похибка" in text, "Текст звіту має містити 'Похибка' при розбіжності"
+    assert "15.0%" in text, f"Очікувалось '15.0%' у тексті, отримано: {text!r}"
+
+
+# ── Правило 2.2 — рівні емодзі точності в P1-звіті ───────────────────────────
+
+def test_accuracy_emoji_levels():
+    """Емодзі-рівні точності: ≤5% → ✅, 6-12% → 🔶, >12% → 🔴 (P1-формат звіту)."""
+    from bot.handlers.tracking import _format_odometer_accuracy
+    # odo_start=0, odo_km=100 → odometer_diff=100
+    # diff_pct = abs(total_km - 100) / 100 * 100
+
+    text_ok, _ = _format_odometer_accuracy(96.0, 0.0, 100.0)   # diff=4% → ✅
+    text_warn, _ = _format_odometer_accuracy(92.0, 0.0, 100.0)  # diff=8% → 🔶
+    text_red, _ = _format_odometer_accuracy(85.0, 0.0, 100.0)   # diff=15% → 🔴
+
+    assert "✅" in text_ok,  f"4% має давати ✅, отримано: {text_ok!r}"
+    assert "🔶" in text_warn, f"8% має давати 🔶, отримано: {text_warn!r}"
+    assert "🔴" in text_red, f"15% має давати 🔴, отримано: {text_red!r}"

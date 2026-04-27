@@ -32,6 +32,9 @@ from bot.services.weekly_report_service import format_weekly_report
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler(timezone="Europe/Kyiv")
 
+# Shared instance — ініціалізується в setup_scheduler, використовується у всіх jobs
+_shared_coeff_service = None
+
 
 def _odo_accuracy_block(total_km: float, odo_start, odo_finish) -> str:
     if odo_start is None or odo_finish is None:
@@ -185,7 +188,8 @@ async def _auto_close_active_routes_inner(bot: Bot, pg_pool=None):
                     from bot.services.route_cost_service import on_route_finished, get_driver_type
                     from bot.services.coefficients_service import CoefficientsService
                     _driver_type = get_driver_type(route["telegram_id"])
-                    _coefficients = await CoefficientsService(pg_pool).get()
+                    svc = _shared_coeff_service or CoefficientsService(pg_pool)
+                    _coefficients = await svc.get()
                     await on_route_finished(
                         route_id=route_id,
                         driver_id=route["telegram_id"],
@@ -367,7 +371,33 @@ async def check_active_route_gaps(bot: Bot) -> None:
                 pass
 
 
+async def update_fuel_prices_job(bot: Bot, pg_pool=None):
+    """Щотижневий job: авто-оновлення цін на пальне."""
+    if not pg_pool:
+        return
+    try:
+        from bot.services.fuel_price_updater import update_fuel_prices
+        from config_p2 import SUPER_ADMIN_IDS
+        svc = _shared_coeff_service
+        if svc is None:
+            from bot.services.coefficients_service import CoefficientsService
+            svc = CoefficientsService(pg_pool)
+        await update_fuel_prices(pg_pool, svc, bot, SUPER_ADMIN_IDS)
+    except Exception as e:
+        logger.error("Scheduler job update_fuel_prices failed: %s", e)
+        for admin_id in list(set(ADMIN_IDS + SUPER_ADMIN_IDS)):
+            try:
+                await bot.send_message(admin_id, f"⚠️ Scheduler job впав:\nupdate_fuel_prices\n{e}")
+            except Exception:
+                pass
+
+
 def setup_scheduler(bot: Bot, pg_pool=None):
+    global _shared_coeff_service
+    if pg_pool:
+        from bot.services.coefficients_service import CoefficientsService
+        _shared_coeff_service = CoefficientsService(pg_pool)
+
     scheduler.add_job(
         send_daily_report,
         CronTrigger(hour=DAILY_REPORT_HOUR, minute=DAILY_REPORT_MINUTE),
@@ -408,6 +438,13 @@ def setup_scheduler(bot: Bot, pg_pool=None):
         CronTrigger(minute="*/5"),
         args=[bot],
         id="check_active_route_gaps",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        update_fuel_prices_job,
+        CronTrigger(day_of_week="mon", hour=8, minute=0),
+        args=[bot, pg_pool],
+        id="update_fuel_prices",
         replace_existing=True,
     )
     scheduler.start()

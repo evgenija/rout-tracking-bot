@@ -24,7 +24,9 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncpg
-from config_p2 import PG_DATABASE_URL
+from dotenv import load_dotenv
+load_dotenv()
+PG_DATABASE_URL = os.getenv("DATABASE_PUBLIC_URL") or os.getenv("PG_DATABASE_URL", "")
 from bot.config import DB_PATH
 from bot.services.calculator import select_final_km, _calc_logistics_cost
 

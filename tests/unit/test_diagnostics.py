@@ -55,3 +55,25 @@ def test_auto_close_not_triggers_alert():
     # Сценарій 4: обидва None
     _, should_alert = _format_odometer_accuracy(100.0, None, None)
     assert not should_alert
+
+
+def test_no_alert_without_odometer_start():
+    """Без odometer_start (водій не ввів на старті) → should_alert=False."""
+    from bot.handlers.tracking import _format_odometer_accuracy
+    _, should_alert = _format_odometer_accuracy(100.0, None, 356200.0)
+    assert not should_alert, \
+        "Без odometer_start алерт не повинен надсилатися"
+
+
+def test_both_directions_diff_shown():
+    """Розбіжність показується в обох напрямках: GPS > одометр і одометр > GPS."""
+    from bot.handlers.tracking import _format_odometer_accuracy
+    # GPS > одометр: tracking=150 km, odo_diff=100 → diff_pct=50% → 🔴, should_alert=True
+    text_gps_more, alert_gps_more = _format_odometer_accuracy(150.0, 0.0, 100.0)
+    assert "🔴" in text_gps_more
+    assert alert_gps_more
+
+    # Одометр > GPS: tracking=50 km, odo_diff=100 → diff_pct=50% → 🔴, should_alert=True
+    text_odo_more, alert_odo_more = _format_odometer_accuracy(50.0, 0.0, 100.0)
+    assert "🔴" in text_odo_more
+    assert alert_odo_more

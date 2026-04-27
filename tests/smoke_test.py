@@ -61,7 +61,18 @@ if conn:
     except Exception as e:
         check("Активні маршрути мають is_active (не status)", False, str(e))
 
-# Test 4: Regression — auto_close не містить хибне повідомлення про одометр
+# Test 4: Колонка route_polyline існує в production БД (фіча 23.04.2026)
+if conn:
+    try:
+        cur.execute("PRAGMA table_info(routes)")
+        columns = [row[1] for row in cur.fetchall()]
+        has_polyline = "route_polyline" in columns
+        check("Колонка route_polyline існує в таблиці routes", has_polyline,
+              f"відсутня — потрібна міграція init_db(). Колонки: {columns}" if not has_polyline else "")
+    except Exception as e:
+        check("Колонка route_polyline існує в таблиці routes", False, str(e))
+
+# Test 5: Regression — auto_close не містить хибне повідомлення про одометр
 try:
     candidates = [
         "/app/bot/utils/scheduler.py",
