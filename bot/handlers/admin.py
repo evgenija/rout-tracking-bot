@@ -82,12 +82,6 @@ async def btn_drivers(message: Message):
     await message.answer("🚗 Управління водіями:", reply_markup=kb_drivers_menu())
 
 
-@router.message(F.text == "💰 Фін модель")
-async def btn_finance(message: Message):
-    if not is_admin(message.from_user.id):
-        return
-    await message.answer("💰 Фінансова модель — в розробці.")
-
 
 # ── Inline callbacks: звіти ───────────────────────────────────────────────────
 

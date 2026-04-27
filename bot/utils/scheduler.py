@@ -392,9 +392,135 @@ async def update_fuel_prices_job(bot: Bot, pg_pool=None):
                 pass
 
 
-def setup_scheduler(bot: Bot, pg_pool=None):
+async def check_weekly_missing_revenue(bot: Bot, pg_pool=None):
+    """Сб 18:00 — перевірка пропущеної виручки за тиждень."""
+    if not pg_pool:
+        return
+    try:
+        from datetime import date
+        from bot.services.finance_service import get_missing_revenue_days
+        today = get_kyiv_time().date()
+        week_start = today - timedelta(days=today.weekday())  # поточний пн
+        missing = await get_missing_revenue_days(pg_pool, week_start, today)
+        if not missing:
+            return
+        days_str = ", ".join(d.strftime("%d.%m") for d in missing)
+        text = (
+            f"📋 Є пропуски у виручці за {week_start.strftime('%d.%m')}–{today.strftime('%d.%m.%Y')}:\n"
+            f"Дні без даних: {days_str}\n\n"
+            f"Натисни 💰 Фін модель щоб ввести або введи за кілька днів одразу."
+        )
+        for admin_id in SUPER_ADMIN_IDS:
+            try:
+                await bot.send_message(admin_id, text)
+            except Exception as e:
+                logger.warning("check_weekly_missing: notify failed %s: %s", admin_id, e)
+    except Exception as e:
+        logger.error("Scheduler job check_weekly_missing_revenue failed: %s", e)
+        for admin_id in list(set(ADMIN_IDS + SUPER_ADMIN_IDS)):
+            try:
+                await bot.send_message(admin_id, f"⚠️ Scheduler job впав:\ncheck_weekly_missing_revenue\n{e}")
+            except Exception:
+                pass
+
+
+async def send_weekly_revenue_reminder(bot: Bot):
+    """Пн 09:00 — нагадування ввести виручку."""
+    try:
+        today = get_kyiv_time().date()
+        prev_week_end = today - timedelta(days=1)  # нд
+        prev_week_start = prev_week_end - timedelta(days=6)  # пн
+        text = (
+            f"📊 Новий тиждень!\n"
+            f"Чи введена виручка за {prev_week_start.strftime('%d.%m')}–{prev_week_end.strftime('%d.%m')}?\n"
+            f"Натисни 💰 Фін модель щоб перевірити або ввести."
+        )
+        for admin_id in SUPER_ADMIN_IDS:
+            try:
+                await bot.send_message(admin_id, text)
+            except Exception as e:
+                logger.warning("weekly_reminder: notify failed %s: %s", admin_id, e)
+    except Exception as e:
+        logger.error("Scheduler job send_weekly_revenue_reminder failed: %s", e)
+        for admin_id in list(set(ADMIN_IDS + SUPER_ADMIN_IDS)):
+            try:
+                await bot.send_message(admin_id, f"⚠️ Scheduler job впав:\nsend_weekly_revenue_reminder\n{e}")
+            except Exception:
+                pass
+
+
+async def send_weekly_finance_report(bot: Bot, pg_pool=None):
+    """Пн 20:00 — тижневий фін звіт (частковий якщо є пропуски)."""
+    if not pg_pool:
+        return
+    try:
+        from datetime import date
+        from bot.services.finance_service import build_weekly_result
+        from bot.services.report_service_finance import format_weekly_report_finance
+        today = get_kyiv_time().date()
+        prev_week_end = today - timedelta(days=1)
+        prev_week_start = prev_week_end - timedelta(days=6)
+        svc = _shared_coeff_service
+        if svc is None:
+            from bot.services.coefficients_service import CoefficientsService
+            svc = CoefficientsService(pg_pool)
+        coefficients = await svc.get()
+        result = await build_weekly_result(pg_pool, prev_week_start, prev_week_end, coefficients)
+        text = format_weekly_report_finance(result)
+        for admin_id in SUPER_ADMIN_IDS:
+            try:
+                await bot.send_message(admin_id, text)
+            except Exception as e:
+                logger.warning("weekly_finance_report: notify failed %s: %s", admin_id, e)
+    except Exception as e:
+        logger.error("Scheduler job send_weekly_finance_report failed: %s", e)
+        for admin_id in list(set(ADMIN_IDS + SUPER_ADMIN_IDS)):
+            try:
+                await bot.send_message(admin_id, f"⚠️ Scheduler job впав:\nsend_weekly_finance_report\n{e}")
+            except Exception:
+                pass
+
+
+async def send_monthly_finance_report(bot: Bot, pg_pool=None):
+    """1-го числа 08:00 — місячний фін звіт."""
+    if not pg_pool:
+        return
+    try:
+        from datetime import date
+        from bot.services.finance_service import build_monthly_result
+        from bot.services.report_service_finance import format_monthly_report_finance
+        today = get_kyiv_time().date()
+        # звіт за попередній місяць
+        if today.month == 1:
+            year, month = today.year - 1, 12
+        else:
+            year, month = today.year, today.month - 1
+        svc = _shared_coeff_service
+        if svc is None:
+            from bot.services.coefficients_service import CoefficientsService
+            svc = CoefficientsService(pg_pool)
+        coefficients = await svc.get()
+        result = await build_monthly_result(pg_pool, year, month, coefficients)
+        text = format_monthly_report_finance(result, month)
+        for admin_id in SUPER_ADMIN_IDS:
+            try:
+                await bot.send_message(admin_id, text)
+            except Exception as e:
+                logger.warning("monthly_finance_report: notify failed %s: %s", admin_id, e)
+    except Exception as e:
+        logger.error("Scheduler job send_monthly_finance_report failed: %s", e)
+        for admin_id in list(set(ADMIN_IDS + SUPER_ADMIN_IDS)):
+            try:
+                await bot.send_message(admin_id, f"⚠️ Scheduler job впав:\nsend_monthly_finance_report\n{e}")
+            except Exception:
+                pass
+
+
+def setup_scheduler(bot: Bot, pg_pool=None, coeff_service=None):
     global _shared_coeff_service
-    if pg_pool:
+    if coeff_service:
+        _shared_coeff_service = coeff_service
+    elif pg_pool:
         from bot.services.coefficients_service import CoefficientsService
         _shared_coeff_service = CoefficientsService(pg_pool)
 
@@ -445,6 +571,35 @@ def setup_scheduler(bot: Bot, pg_pool=None):
         CronTrigger(day_of_week="mon", hour=8, minute=0),
         args=[bot, pg_pool],
         id="update_fuel_prices",
+        replace_existing=True,
+    )
+    # P&L Finance jobs
+    scheduler.add_job(
+        check_weekly_missing_revenue,
+        CronTrigger(day_of_week="sat", hour=18, minute=0),
+        args=[bot, pg_pool],
+        id="check_weekly_missing_revenue",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        send_weekly_revenue_reminder,
+        CronTrigger(day_of_week="mon", hour=9, minute=0),
+        args=[bot],
+        id="weekly_revenue_reminder",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        send_weekly_finance_report,
+        CronTrigger(day_of_week="mon", hour=20, minute=0),
+        args=[bot, pg_pool],
+        id="weekly_finance_report",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        send_monthly_finance_report,
+        CronTrigger(day=1, hour=8, minute=0),
+        args=[bot, pg_pool],
+        id="monthly_finance_report",
         replace_existing=True,
     )
     scheduler.start()

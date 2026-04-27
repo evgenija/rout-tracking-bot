@@ -15,6 +15,7 @@ from bot.config import BOT_NAME, BOT_TOKEN, ADMIN_IDS, SUPER_ADMIN_IDS, ROUTE_AP
 from config_p2 import PG_DATABASE_URL
 from bot.services.db_init_p2 import create_p2_tables
 from bot.handlers import admin, auth, reports, tracking, ping_handler, debug_handler, route_detail_handler
+from bot.handlers.finance_fsm import router as finance_router, setup_finance_fsm
 from bot.models.database import (
     init_db,
     flag_suspicious_waypoints_retroactive,
@@ -75,6 +76,7 @@ async def main():
         dp["pg_pool"] = pg_pool
         logger.info("P2 PostgreSQL pool ініціалізовано.")
     else:
+        pg_pool = None
         logger.warning("PG_DATABASE_URL не задано — P2 функції вимкнено.")
 
     dp.include_router(auth.router)
@@ -84,8 +86,12 @@ async def main():
     dp.include_router(ping_handler.ping_router)
     dp.include_router(debug_handler.debug_router)
     dp.include_router(route_detail_handler.route_detail_router)
+    dp.include_router(finance_router)
 
-    setup_scheduler(bot, pg_pool=dp.get("pg_pool"))
+    from bot.services.coefficients_service import CoefficientsService
+    coeff_service = CoefficientsService(pg_pool) if pg_pool else None
+    setup_finance_fsm(pg_pool, coeff_service)
+    setup_scheduler(bot, pg_pool=pg_pool, coeff_service=coeff_service)
 
     admin_commands = [
         BotCommand(command="remind_ios", description="Нагадування водію про геолокацію iOS"),

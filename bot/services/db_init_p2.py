@@ -6,6 +6,7 @@ P1 таблиці не чіпати.
 
 async def create_p2_tables(pool):
     async with pool.acquire() as conn:
+        await conn.execute("CREATE EXTENSION IF NOT EXISTS btree_gist;")
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS coefficients (
                 id SERIAL PRIMARY KEY,
@@ -60,6 +61,18 @@ async def create_p2_tables(pool):
             VALUES ('tracking_over_odometer_threshold', 0.03, 'Поріг: трекінг > одометр. Перевищення → рахуємо за одометром')
             ON CONFLICT (key) DO NOTHING
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS period_input (
+                id         SERIAL PRIMARY KEY,
+                date_from  DATE        NOT NULL,
+                date_to    DATE        NOT NULL,
+                revenue    BIGINT      NOT NULL,
+                sales_km   INTEGER     NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                CONSTRAINT period_input_no_overlap
+                    EXCLUDE USING gist (daterange(date_from, date_to, '[]') WITH &&)
+            );
+        """)
         # Фінансові коефіцієнти — ON CONFLICT DO NOTHING: не перезаписувати актуальні значення
         for key, value, desc in [
             ("monthly_shared",           292555.0, "Загальні витрати/міс (медіана 2025, грн)"),
@@ -70,6 +83,8 @@ async def create_p2_tables(pool):
             ("fuel_consumption_a95",        7.0,   "Витрата А-95 л/100км (sales managers)"),
             ("fuel_consumption_lpg",       10.0,   "Витрата LPG л/100км (sales managers)"),
             ("sales_amortization_per_km",   0.80,  "Амортизація авто sales managers грн/км"),
+            ("effective_tax_rate",          0.00216, "Ефективна ставка податку: taxes_median/revenue_median_2025"),
+            ("revenue_median_2025",      6737667.0, "Медіана місячного revenue 2025 (грн). Для порівняння у звітах."),
         ]:
             await conn.execute(
                 "INSERT INTO coefficients (key, value, description) VALUES ($1, $2, $3) "
