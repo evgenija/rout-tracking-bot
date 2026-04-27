@@ -207,6 +207,10 @@ async def process_sales_km(message: Message, state: FSMContext):
             "⚠️ Не вдалося згенерувати звіт. Спробуйте /daily_report.",
             reply_markup=ReplyKeyboardRemove(),
         )
+        await message.answer(
+            "Якщо дані введені помилково — видали запис кнопкою нижче та введи знову.",
+            reply_markup=_delete_kb(input_date),
+        )
 
 
 @router.message(Command("finance_list"))
