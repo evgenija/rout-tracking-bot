@@ -10,7 +10,7 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
-    Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
+    Message, ReplyKeyboardMarkup, KeyboardButton,
     InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery,
 )
 from aiogram.filters import Command
@@ -20,9 +20,9 @@ from bot.services.finance_service import (
     get_open_routes_for_date,
     save_period_input,
     get_daily_op_result,
-    get_delivery_totals_for_date,
 )
 from bot.services.report_service import format_daily_op_report
+from bot.utils.keyboards import kb_admin_main
 from bot.utils.time_utils import get_kyiv_time
 
 logger = logging.getLogger(__name__)
@@ -94,7 +94,7 @@ async def cancel_input(message: Message, state: FSMContext):
     if not _is_super_admin(message.from_user.id):
         return
     await state.clear()
-    await message.answer("Скасовано.", reply_markup=ReplyKeyboardRemove())
+    await message.answer("Скасовано.", reply_markup=kb_admin_main())
 
 
 @router.message(RevenueInput.waiting_revenue)
@@ -154,8 +154,8 @@ async def process_sales_km(message: Message, state: FSMContext):
     if not saved:
         await message.answer(
             "❌ Помилка збереження. Можливо, виручка за цю дату вже введена.\n"
-            "Переглянь список через 💰 Фін модель → /finance_list",
-            reply_markup=ReplyKeyboardRemove(),
+            "Переглянь список через /finance_list.",
+            reply_markup=kb_admin_main(),
         )
         return
 
@@ -167,7 +167,7 @@ async def process_sales_km(message: Message, state: FSMContext):
             await message.answer(
                 "✅ Збережено!\n\n"
                 "⚠️ Не вдалося розрахувати Op.Profit — перевірте дані доставки.",
-                reply_markup=ReplyKeyboardRemove(),
+                reply_markup=kb_admin_main(),
             )
             await message.answer(
                 "Якщо дані введені помилково — видали запис кнопкою нижче та введи знову.",
@@ -191,10 +191,7 @@ async def process_sales_km(message: Message, state: FSMContext):
                     except Exception:
                         pass
 
-        await message.answer(
-            report_text,
-            reply_markup=ReplyKeyboardRemove(),
-        )
+        await message.answer(report_text, reply_markup=kb_admin_main())
         await message.answer(
             "Якщо дані введені помилково — видали запис кнопкою нижче та введи знову.",
             reply_markup=_delete_kb(input_date),
@@ -205,7 +202,7 @@ async def process_sales_km(message: Message, state: FSMContext):
         await message.answer(
             "✅ Дані збережено!\n\n"
             "⚠️ Не вдалося згенерувати звіт. Спробуйте /daily_report.",
-            reply_markup=ReplyKeyboardRemove(),
+            reply_markup=kb_admin_main(),
         )
         await message.answer(
             "Якщо дані введені помилково — видали запис кнопкою нижче та введи знову.",
@@ -260,7 +257,7 @@ async def cb_finance_delete(callback: CallbackQuery):
         await callback.answer("⚠️ БД недоступна.", show_alert=True)
         return
 
-    date_str = callback.data.removeprefix("fin_del:")
+    date_str = callback.data[len("fin_del:"):]
     try:
         target_date = date.fromisoformat(date_str)
     except ValueError:
