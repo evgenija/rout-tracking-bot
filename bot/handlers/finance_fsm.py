@@ -53,6 +53,15 @@ _cancel_kb = ReplyKeyboardMarkup(
     one_time_keyboard=True,
 )
 
+_cancel_km_kb = ReplyKeyboardMarkup(
+    keyboard=[[
+        KeyboardButton(text="◀ Змінити виручку"),
+        KeyboardButton(text="❌ Скасувати"),
+    ]],
+    resize_keyboard=True,
+    one_time_keyboard=True,
+)
+
 
 def _delete_kb(target_date: date) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
@@ -97,6 +106,20 @@ async def cancel_input(message: Message, state: FSMContext):
     await message.answer("Скасовано.", reply_markup=kb_admin_main())
 
 
+@router.message(F.text == "◀ Змінити виручку", RevenueInput.waiting_sales_km)
+async def back_to_revenue(message: Message, state: FSMContext):
+    if not _is_super_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    input_date = date.fromisoformat(data["input_date"])
+    await state.set_state(RevenueInput.waiting_revenue)
+    await message.answer(
+        f"💰 Введіть виручку за {input_date.strftime('%d.%m.%Y')} (грн):\n"
+        f"Наприклад: 850000",
+        reply_markup=_cancel_kb,
+    )
+
+
 @router.message(RevenueInput.waiting_revenue)
 async def process_revenue(message: Message, state: FSMContext):
     if not _is_super_admin(message.from_user.id):
@@ -117,7 +140,7 @@ async def process_revenue(message: Message, state: FSMContext):
         f"✅ Виручка: {revenue:,} грн\n\n"
         f"🚗 Кілометри sales-менеджерів за {date.fromisoformat((await state.get_data())['input_date']).strftime('%d.%m.%Y')}:\n"
         f"(Введіть 0 якщо не їздили)",
-        reply_markup=_cancel_kb,
+        reply_markup=_cancel_km_kb,
     )
     await state.set_state(RevenueInput.waiting_sales_km)
 
