@@ -1,6 +1,7 @@
 """
-finance_fsm.py — FSM щоденного вводу виручки та sales km.
+finance_fsm.py — FSM щоденного та пакетного вводу виручки та sales km.
 Кнопка "💰 Фін модель" → перевірка маршрутів → revenue → sales_km → звіт.
+batch_revenue callback → пакетний ввід за діапазон дат (з scheduler).
 Тільки для super-admin.
 """
 import logging
@@ -39,6 +40,11 @@ def setup_finance_fsm(pg_pool, coeff_service):
 
 
 class RevenueInput(StatesGroup):
+    waiting_revenue  = State()
+    waiting_sales_km = State()
+
+
+class BatchRevenueInput(StatesGroup):
     waiting_revenue  = State()
     waiting_sales_km = State()
 
@@ -325,3 +331,120 @@ async def cb_finance_delete(callback: CallbackQuery):
     except Exception as e:
         logger.exception("fin_del callback failed: %s", e)
         await callback.answer(f"⚠️ Помилка: {e}", show_alert=True)
+
+
+# ── Пакетний ввід виручки + sales_km за діапазон дат ──────────────────────────
+# Точка входу: inline-кнопка "📥 Ввести за ... одразу" зі scheduler-нотифікації
+
+@router.callback_query(F.data.startswith("batch_revenue:"))
+async def cb_batch_revenue_start(callback: CallbackQuery, state: FSMContext):
+    if not _is_super_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    parts = callback.data.split(":")
+    # формат: batch_revenue:YYYY-MM-DD:YYYY-MM-DD
+    try:
+        date_from = date.fromisoformat(parts[1])
+        date_to   = date.fromisoformat(parts[2])
+    except (IndexError, ValueError):
+        await callback.answer("❌ Невірний формат дат.", show_alert=True)
+        return
+    period_str = f"{date_from.strftime('%d.%m')}–{date_to.strftime('%d.%m.%Y')}"
+    await state.update_data(batch_date_from=date_from.isoformat(), batch_date_to=date_to.isoformat())
+    await state.set_state(BatchRevenueInput.waiting_revenue)
+    await callback.message.answer(
+        f"📥 Пакетний ввід за {period_str}\n\n"
+        f"💰 Введіть загальну суму виручки (грн):\n"
+        f"Наприклад: 4250000",
+        reply_markup=_cancel_kb,
+    )
+    await callback.answer()
+
+
+@router.message(F.text == "◀ Змінити виручку", BatchRevenueInput.waiting_sales_km)
+async def back_to_batch_revenue(message: Message, state: FSMContext):
+    if not _is_super_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    date_from  = date.fromisoformat(data["batch_date_from"])
+    date_to    = date.fromisoformat(data["batch_date_to"])
+    period_str = f"{date_from.strftime('%d.%m')}–{date_to.strftime('%d.%m.%Y')}"
+    await state.set_state(BatchRevenueInput.waiting_revenue)
+    await message.answer(
+        f"💰 Введіть загальну суму виручки за {period_str} (грн):\n"
+        f"Наприклад: 4250000",
+        reply_markup=_cancel_kb,
+    )
+
+
+@router.message(BatchRevenueInput.waiting_revenue)
+async def batch_process_revenue(message: Message, state: FSMContext):
+    if not _is_super_admin(message.from_user.id):
+        return
+    text = message.text.strip().replace(" ", "").replace(",", "")
+    if not text.isdigit() or int(text) <= 0:
+        await message.answer(
+            "❌ Введіть суму в гривнях цілим числом > 0\n"
+            "Наприклад: 4250000",
+            reply_markup=_cancel_kb,
+        )
+        return
+    revenue = int(text)
+    data = await state.get_data()
+    await state.update_data(batch_revenue=revenue)
+    date_from  = date.fromisoformat(data["batch_date_from"])
+    date_to    = date.fromisoformat(data["batch_date_to"])
+    period_str = f"{date_from.strftime('%d.%m')}–{date_to.strftime('%d.%m.%Y')}"
+    await message.answer(
+        f"✅ Виручка: {revenue:,} грн\n\n"
+        f"🚗 Кілометри sales-менеджерів за {period_str}:\n"
+        f"(Введіть 0 якщо не їздили)",
+        reply_markup=_cancel_km_kb,
+    )
+    await state.set_state(BatchRevenueInput.waiting_sales_km)
+
+
+@router.message(BatchRevenueInput.waiting_sales_km)
+async def batch_process_sales_km(message: Message, state: FSMContext):
+    if not _is_super_admin(message.from_user.id):
+        return
+    text = message.text.strip().replace(" ", "")
+    if not text.isdigit():
+        await message.answer(
+            "❌ Введіть кілометри цілим числом ≥ 0\n"
+            "Наприклад: 1200 або 0",
+            reply_markup=_cancel_kb,
+        )
+        return
+    sales_km = int(text)
+    data = await state.get_data()
+    await state.clear()
+    revenue   = data["batch_revenue"]
+    date_from = date.fromisoformat(data["batch_date_from"])
+    date_to   = date.fromisoformat(data["batch_date_to"])
+    period_str = f"{date_from.strftime('%d.%m')}–{date_to.strftime('%d.%m.%Y')}"
+
+    saved = await save_period_input(
+        pg_pool=_pg_pool,
+        date_from=date_from,
+        date_to=date_to,
+        revenue=revenue,
+        sales_km=sales_km,
+    )
+
+    if not saved:
+        await message.answer(
+            f"❌ Помилка збереження. Можливо, виручка за {period_str} вже частково введена.\n"
+            "Переглянь список через /finance_list.",
+            reply_markup=kb_admin_main(),
+        )
+        return
+
+    revenue_fmt = f"{revenue:,}".replace(",", " ")
+    await message.answer(
+        f"✅ Збережено!\n"
+        f"📅 Період: {period_str}\n"
+        f"💰 Виручка: {revenue_fmt} грн\n"
+        f"🚗 Sales км: {sales_km}",
+        reply_markup=kb_admin_main(),
+    )

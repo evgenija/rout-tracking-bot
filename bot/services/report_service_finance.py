@@ -42,12 +42,24 @@ def format_weekly_report_finance(result: WeeklyResult) -> str:
         f"{'✅' if result.net_profit >= 0 else '🔴'} Чистий прибуток:         {_fmt(result.net_profit)}",
     ]
 
-    if result.breakeven_day > 0:
-        avg_day = result.revenue / max(len([]), 1) if result.revenue else 0
+    if result.breakeven_day > 0 and result.days_in_week > 0:
+        daily_avg = result.revenue / result.days_in_week
+        ratio = daily_avg / result.breakeven_day
+        symbol = "✅" if ratio >= 1 else "⚠️"
         lines += [
             "",
-            f"📍 Беззбитковість/день:    {_fmt(result.breakeven_day)}",
+            f"📍 Беззбитковість:",
+            f"   На день потрібно:    {_fmt(result.breakeven_day)}",
+            f"   Середня за тиждень:  {_fmt(daily_avg)} (×{ratio:.1f} від мінімуму {symbol})",
         ]
+        if result.working_days_in_month > 0 and result.monthly_fixed > 0:
+            op_daily_avg = result.op_profit / result.days_in_week
+            projected_net = op_daily_avg * result.working_days_in_month - result.monthly_fixed
+            month_name = _MONTHS_UA[result.week_start.month]
+            if projected_net >= 0:
+                lines.append(f"📈 Прогноз на {month_name}: ~{_fmt(projected_net)} чистого прибутку")
+            else:
+                lines.append(f"📈 Прогноз на {month_name}: {_fmt(projected_net)} (збиток якщо темп збережеться)")
 
     if result.revenue_vs_median_pct is not None:
         lines.append(f"📈 vs медіана 2025:         {_pct(result.revenue_vs_median_pct)}")

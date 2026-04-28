@@ -81,6 +81,9 @@ class WeeklyResult:
     revenue_vs_median_pct: Optional[float]  # None якщо немає медіани
     is_partial: bool
     missing_days: list
+    days_in_week: int = 0
+    working_days_in_month: int = 0
+    monthly_fixed: float = 0.0
 
 
 @dataclass
@@ -336,6 +339,8 @@ def calculate_weekly_net_profit(
         if weekly_median > 0 else None
     )
 
+    monthly_fixed = coefficients["monthly_shared"] + coefficients["monthly_taxes"]
+
     return WeeklyResult(
         week_start=week_start,
         week_end=week_end,
@@ -348,6 +353,9 @@ def calculate_weekly_net_profit(
         revenue_vs_median_pct=revenue_vs_median,
         is_partial=False,
         missing_days=[],
+        days_in_week=days_in_week,
+        working_days_in_month=working_days_in_month,
+        monthly_fixed=monthly_fixed,
     )
 
 

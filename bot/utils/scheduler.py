@@ -398,6 +398,7 @@ async def check_weekly_missing_revenue(bot: Bot, pg_pool=None):
         return
     try:
         from datetime import date
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         from bot.services.finance_service import get_missing_revenue_days
         today = get_kyiv_time().date()
         week_start = today - timedelta(days=today.weekday())  # поточний пн
@@ -407,12 +408,29 @@ async def check_weekly_missing_revenue(bot: Bot, pg_pool=None):
         days_str = ", ".join(d.strftime("%d.%m") for d in missing)
         text = (
             f"📋 Є пропуски у виручці за {week_start.strftime('%d.%m')}–{today.strftime('%d.%m.%Y')}:\n"
-            f"Дні без даних: {days_str}\n\n"
-            f"Натисни 💰 Фін модель щоб ввести або введи за кілька днів одразу."
+            f"Дні без даних: {days_str}"
         )
+        # Групуємо суміжні дні у блоки, щоб уникнути overlap при збереженні
+        blocks, start, prev = [], missing[0], missing[0]
+        for d in missing[1:]:
+            if (d - prev).days == 1:
+                prev = d
+            else:
+                blocks.append((start, prev))
+                start = prev = d
+        blocks.append((start, prev))
+
+        buttons = [
+            [InlineKeyboardButton(
+                text=f"📥 Ввести за {bf.strftime('%d.%m')}–{bt.strftime('%d.%m')} одразу",
+                callback_data=f"batch_revenue:{bf.isoformat()}:{bt.isoformat()}",
+            )]
+            for bf, bt in blocks if bf != bt  # однодення блоки — без кнопки
+        ]
+        kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
         for admin_id in SUPER_ADMIN_IDS:
             try:
-                await bot.send_message(admin_id, text)
+                await bot.send_message(admin_id, text, reply_markup=kb)
             except Exception as e:
                 logger.warning("check_weekly_missing: notify failed %s: %s", admin_id, e)
     except Exception as e:

@@ -85,7 +85,7 @@ async def get_revenue_for_date(pg_pool, target_date: date) -> Optional[dict]:
         async with pg_pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT revenue, sales_km
+                SELECT revenue, sales_km, date_from, date_to
                 FROM period_input
                 WHERE date_from <= $1 AND date_to >= $1
                 ORDER BY created_at DESC
@@ -95,7 +95,13 @@ async def get_revenue_for_date(pg_pool, target_date: date) -> Optional[dict]:
             )
         if row is None:
             return None
-        return {"revenue": int(row["revenue"]), "sales_km": int(row["sales_km"])}
+        # Batch-запис зберігає суму за весь діапазон — ділимо на кількість днів,
+        # щоб калькулятор отримував денне значення (для денних записів days=1).
+        days = (row["date_to"] - row["date_from"]).days + 1
+        return {
+            "revenue":  int(row["revenue"])  // days,
+            "sales_km": int(row["sales_km"]) // days,
+        }
     except Exception as e:
         logger.warning("get_revenue_for_date failed for %s: %s", target_date, e)
         return None
@@ -236,6 +242,7 @@ async def build_weekly_result(
             revenue=0, op_profit=0, shared_week=0, taxes_week=0,
             net_profit=0, breakeven_day=0, revenue_vs_median_pct=None,
             is_partial=True, missing_days=missing,
+            days_in_week=0, working_days_in_month=working_days, monthly_fixed=0.0,
         )
 
     result = calculate_weekly_net_profit(

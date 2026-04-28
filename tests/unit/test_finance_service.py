@@ -210,7 +210,10 @@ async def test_get_revenue_for_date_from_mock_pool():
     from bot.services.finance_service import get_revenue_for_date
 
     mock_conn = AsyncMock()
-    mock_conn.fetchrow.return_value = {"revenue": 850000, "sales_km": 550}
+    mock_conn.fetchrow.return_value = {
+        "revenue": 850000, "sales_km": 550,
+        "date_from": date(2026, 4, 27), "date_to": date(2026, 4, 27),
+    }
     mock_pool = MagicMock()
     mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
     mock_pool.acquire.return_value.__aexit__  = AsyncMock(return_value=False)
