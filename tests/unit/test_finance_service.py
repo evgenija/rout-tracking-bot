@@ -106,7 +106,11 @@ def test_weekly_net_profit_formula():
     assert abs(result.shared_week - 292555 * 3 / 22) < 1.0
     assert abs(result.taxes_week - 3 * 850_000 * 0.00216) < 1.0
     assert result.net_profit < result.op_profit
+    # revenue_vs_median: тиждень vs тижнева медіана (revenue_median_2025 / 4.33)
+    # 2_550_000 / (6_737_667 / 4.33) - 1 ≈ +0.637 → позитивне значення
     assert result.revenue_vs_median_pct is not None
+    assert result.revenue_vs_median_pct > 0  # 2.55M/тиждень > медіани ~1.56M/тиждень
+    assert abs(result.revenue_vs_median_pct - (2_550_000 / (6_737_667 / 4.33) - 1) * 100) < 0.1
 
 
 def test_weekly_no_data_returns_zero_net():

@@ -330,9 +330,10 @@ def calculate_weekly_net_profit(
         if working_days_in_month > 0 else 0.0
     )
 
+    weekly_median = revenue_median / 4.33
     revenue_vs_median = (
-        (revenue_week / revenue_median - 1) * 100
-        if revenue_median > 0 else None
+        (revenue_week / weekly_median - 1) * 100
+        if weekly_median > 0 else None
     )
 
     return WeeklyResult(
