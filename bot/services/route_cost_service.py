@@ -8,6 +8,7 @@ from datetime import date
 
 from bot.services.calculator import _calc_logistics_cost, select_final_km
 from bot.config import ADMIN_IDS
+from bot.utils.time_utils import get_kyiv_time
 from config_p2 import SUPER_ADMIN_IDS
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,7 @@ async def on_route_finished(
                     (date, route_id, driver_id, driver_type, km, logistics_cost)
                 VALUES ($1, $2, $3, $4, $5, $6)
                 """,
-                date.today(), route_id, driver_id, driver_type, final_km, cost,
+                get_kyiv_time().date(), route_id, driver_id, driver_type, final_km, cost,
             )
     except Exception as e:
         logger.warning("P2 daily_input save failed: %s", e)
@@ -88,3 +89,25 @@ async def on_route_finished(
             await bot.send_message(admin_id, text)
         except Exception:
             pass
+
+    # Якщо це останній відкритий маршрут за сьогодні і виручка вже введена —
+    # надіслати скоригований денний Op.Profit з повними витратами
+    try:
+        from bot.services.finance_service import get_open_routes_for_date, get_daily_op_result
+        from bot.services.report_service import format_daily_op_report
+        route_date = get_kyiv_time().date()
+        open_routes = await get_open_routes_for_date(route_date)
+        if not open_routes:
+            result = await get_daily_op_result(pg_pool, route_date, coefficients)
+            if result is not None:
+                corrected_text = (
+                    f"🔄 Всі маршрути закрито — перерахунок за {route_date.strftime('%d.%m.%Y')}\n\n"
+                    + format_daily_op_report(result)
+                )
+                for admin_id in SUPER_ADMIN_IDS:
+                    try:
+                        await bot.send_message(admin_id, corrected_text)
+                    except Exception:
+                        pass
+    except Exception as _e:
+        logger.warning("Corrected daily report after route close failed: %s", _e)

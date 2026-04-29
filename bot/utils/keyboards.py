@@ -65,6 +65,24 @@ def kb_admin_driver_active() -> ReplyKeyboardMarkup:
     )
 
 
+def kb_fin_menu() -> InlineKeyboardMarkup:
+    """Головне меню 💰 Фін модель — вибір дії."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📥 Ввести виручку", callback_data="fin:enter")],
+        [InlineKeyboardButton(text="📊 Звіти P&L",      callback_data="fin:reports")],
+    ])
+
+
+def kb_fin_reports_menu() -> InlineKeyboardMarkup:
+    """Підменю P2 фінансових звітів."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💰 Op.Profit сьогодні", callback_data="fin:rpt:daily")],
+        [InlineKeyboardButton(text="📈 Тижневий P&L",       callback_data="fin:rpt:weekly")],
+        [InlineKeyboardButton(text="📆 Місячний P&L",       callback_data="fin:rpt:monthly")],
+        [InlineKeyboardButton(text="◀ Назад",               callback_data="fin:back")],
+    ])
+
+
 def kb_reports_menu() -> InlineKeyboardMarkup:
     """Підменю звітів."""
     return InlineKeyboardMarkup(inline_keyboard=[

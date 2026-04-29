@@ -5,7 +5,7 @@ batch_revenue callback → пакетний ввід за діапазон да�
 Тільки для super-admin.
 """
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
@@ -21,9 +21,15 @@ from bot.services.finance_service import (
     get_open_routes_for_date,
     save_period_input,
     get_daily_op_result,
+    build_weekly_result,
+    build_monthly_result,
 )
 from bot.services.report_service import format_daily_op_report
-from bot.utils.keyboards import kb_admin_main
+from bot.services.report_service_finance import (
+    format_weekly_report_finance,
+    format_monthly_report_finance,
+)
+from bot.utils.keyboards import kb_admin_main, kb_fin_menu, kb_fin_reports_menu
 from bot.utils.time_utils import get_kyiv_time
 
 logger = logging.getLogger(__name__)
@@ -81,27 +87,135 @@ def _delete_kb(target_date: date) -> InlineKeyboardMarkup:
 @router.message(F.text == "💰 Фін модель")
 async def btn_finance(message: Message, state: FSMContext):
     if not _is_super_admin(message.from_user.id):
+        await message.answer("⛔ Фін модель доступна тільки для супер-адмінів.")
         return
+    await state.clear()
+    await message.answer("💰 Фін модель:", reply_markup=kb_fin_menu())
+
+
+@router.callback_query(F.data == "fin:enter")
+async def cb_fin_enter(callback: CallbackQuery, state: FSMContext):
+    if not _is_super_admin(callback.from_user.id):
+        await callback.answer("⛔ Недостатньо прав.", show_alert=True)
+        return
+    await callback.answer()
 
     today = get_kyiv_time().date()
     open_routes = await get_open_routes_for_date(today)
 
     if open_routes:
         names = ", ".join(r.get("full_name") or f"ID {r['id']}" for r in open_routes)
-        await message.answer(
+        await callback.message.answer(
             f"⏳ Є незакриті маршрути за {today.strftime('%d.%m.%Y')}:\n"
             f"{names}\n\n"
             f"Операційний прибуток покажу після їх закриття.\n"
             f"Або введи виручку зараз (без урахування відкритих маршрутів).",
         )
 
-    await message.answer(
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer(
         f"💰 Введіть виручку за {today.strftime('%d.%m.%Y')} (грн):\n"
         f"Наприклад: 850000",
         reply_markup=_cancel_kb,
     )
     await state.set_state(RevenueInput.waiting_revenue)
     await state.update_data(input_date=today.isoformat())
+
+
+@router.callback_query(F.data == "fin:reports")
+async def cb_fin_reports(callback: CallbackQuery):
+    if not _is_super_admin(callback.from_user.id):
+        await callback.answer("⛔ Недостатньо прав.", show_alert=True)
+        return
+    await callback.answer()
+    await callback.message.edit_reply_markup(reply_markup=kb_fin_reports_menu())
+
+
+@router.callback_query(F.data == "fin:back")
+async def cb_fin_back(callback: CallbackQuery):
+    if not _is_super_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    await callback.message.edit_reply_markup(reply_markup=kb_fin_menu())
+
+
+@router.callback_query(F.data == "fin:rpt:daily")
+async def cb_fin_rpt_daily(callback: CallbackQuery):
+    if not _is_super_admin(callback.from_user.id):
+        await callback.answer("⛔ Недостатньо прав.", show_alert=True)
+        return
+    if _pg_pool is None or _coeff_service is None:
+        await callback.answer("⚠️ БД недоступна.", show_alert=True)
+        return
+    await callback.answer()
+    today = get_kyiv_time().date()
+    try:
+        coefficients = await _coeff_service.get()
+        result = await get_daily_op_result(_pg_pool, today, coefficients)
+        if result is None:
+            await callback.message.answer(
+                f"⚠️ Немає даних за {today.strftime('%d.%m.%Y')}.\n"
+                f"Спочатку введіть виручку через 📥 Ввести виручку."
+            )
+            return
+        await callback.message.answer(format_daily_op_report(result))
+    except Exception as e:
+        logger.exception("fin:rpt:daily failed: %s", e)
+        await callback.message.answer(f"⚠️ Помилка генерації звіту: {e}")
+
+
+@router.callback_query(F.data == "fin:rpt:weekly")
+async def cb_fin_rpt_weekly(callback: CallbackQuery):
+    if not _is_super_admin(callback.from_user.id):
+        await callback.answer("⛔ Недостатньо прав.", show_alert=True)
+        return
+    if _pg_pool is None or _coeff_service is None:
+        await callback.answer("⚠️ БД недоступна.", show_alert=True)
+        return
+    await callback.answer()
+    today = get_kyiv_time().date()
+    week_start = today - timedelta(days=today.weekday())
+    open_routes = await get_open_routes_for_date(today)
+    if open_routes:
+        names = ", ".join(r.get("full_name") or f"ID {r['id']}" for r in open_routes)
+        await callback.message.answer(
+            f"⚠️ Незакриті маршрути: {names}\n"
+            f"Дані за {today.strftime('%d.%m')} можуть бути неповні."
+        )
+    try:
+        coefficients = await _coeff_service.get()
+        result = await build_weekly_result(_pg_pool, week_start, today, coefficients)
+        await callback.message.answer(format_weekly_report_finance(result))
+    except Exception as e:
+        logger.exception("fin:rpt:weekly failed: %s", e)
+        await callback.message.answer(f"⚠️ Помилка генерації звіту: {e}")
+
+
+@router.callback_query(F.data == "fin:rpt:monthly")
+async def cb_fin_rpt_monthly(callback: CallbackQuery):
+    if not _is_super_admin(callback.from_user.id):
+        await callback.answer("⛔ Недостатньо прав.", show_alert=True)
+        return
+    if _pg_pool is None or _coeff_service is None:
+        await callback.answer("⚠️ БД недоступна.", show_alert=True)
+        return
+    await callback.answer()
+    today = get_kyiv_time().date()
+    open_routes = await get_open_routes_for_date(today)
+    if open_routes:
+        names = ", ".join(r.get("full_name") or f"ID {r['id']}" for r in open_routes)
+        await callback.message.answer(
+            f"⚠️ Незакриті маршрути: {names}\n"
+            f"Дані за {today.strftime('%d.%m')} можуть бути неповні."
+        )
+    try:
+        coefficients = await _coeff_service.get()
+        result = await build_monthly_result(_pg_pool, today.year, today.month, coefficients)
+        await callback.message.answer(format_monthly_report_finance(result, today.month))
+    except Exception as e:
+        logger.exception("fin:rpt:monthly failed: %s", e)
+        await callback.message.answer(f"⚠️ Помилка генерації звіту: {e}")
 
 
 @router.message(F.text == "❌ Скасувати")
@@ -230,7 +344,7 @@ async def process_sales_km(message: Message, state: FSMContext):
         logger.exception("finance_fsm: report generation failed: %s", e)
         await message.answer(
             "✅ Дані збережено!\n\n"
-            "⚠️ Не вдалося згенерувати звіт. Спробуйте /daily_report.",
+            "⚠️ Не вдалося згенерувати звіт. Спробуйте через 💰 Фін модель → 📊 Звіти P&L.",
             reply_markup=kb_admin_main(),
         )
         await message.answer(
@@ -448,3 +562,50 @@ async def batch_process_sales_km(message: Message, state: FSMContext):
         f"🚗 Sales км: {sales_km}",
         reply_markup=kb_admin_main(),
     )
+
+    # Op.Profit за кожен день діапазону — сумарний результат
+    try:
+        coefficients = await _coeff_service.get()
+        daily_results = []
+        zero_delivery_days = []
+        d = date_from
+        while d <= date_to:
+            r = await get_daily_op_result(_pg_pool, d, coefficients)
+            if r is not None:
+                daily_results.append(r)
+                if r.delivery_total == 0:
+                    zero_delivery_days.append(d)
+            d += timedelta(days=1)
+
+        if not daily_results:
+            return
+
+        def fmt(v: float) -> str:
+            return f"{v:,.0f}".replace(",", " ") + " грн"
+
+        total_revenue   = sum(r.revenue        for r in daily_results)
+        total_cogs      = sum(r.cogs           for r in daily_results)
+        total_delivery  = sum(r.delivery_total for r in daily_results)
+        total_sales_km  = sum(r.sales_km_cost  for r in daily_results)
+        total_salary    = sum(r.sales_salary   for r in daily_results)
+        total_op        = sum(r.op_profit      for r in daily_results)
+
+        lines = [
+            f"📊 Операційний результат за {period_str}",
+            "",
+            f"💰 Виручка:              {fmt(total_revenue)}",
+            f"📦 Собівартість (70%):  -{fmt(total_cogs)}",
+            f"🚚 Доставка:            -{fmt(total_delivery)}",
+            f"👔 Sales км:            -{fmt(total_sales_km)}",
+            f"💼 Зарплата sales:      -{fmt(total_salary)}",
+            "─" * 36,
+            f"{'✅' if total_op >= 0 else '🔴'} Операційний прибуток:  {fmt(total_op)}",
+        ]
+        if zero_delivery_days:
+            days_str = ", ".join(d.strftime("%d.%m") for d in zero_delivery_days)
+            lines.append(f"\n⚠️ Дні без даних доставки: {days_str}")
+            lines.append("Op.Profit може бути завищений для цих днів.")
+
+        await message.answer("\n".join(lines))
+    except Exception as e:
+        logger.exception("batch Op.Profit report failed: %s", e)

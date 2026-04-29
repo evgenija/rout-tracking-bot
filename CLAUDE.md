@@ -66,3 +66,14 @@ python3 -c "import bot.handlers.змінений_модуль; print('OK')"
 - `period_input` — виручка + sales_km; підтримує діапазони (date_from, date_to)
 - `daily_input` — дані доставки по водіях
 - `coefficients` — коефіцієнти (margin_pct, monthly_shared, monthly_taxes, revenue_median_2025 та ін.)
+
+## P2 daily_input — можливі дублі
+`on_route_finished()` робить plain INSERT без ON CONFLICT.
+При подвійному натисканні "Фініш" — виникають 2 записи в `daily_input` з різними km (перший сегмент і повний маршрут).
+Перед аналізом будь-якого маршруту завжди перевіряти:
+```sql
+SELECT route_id, COUNT(*), SUM(km), SUM(logistics_cost)
+FROM daily_input
+GROUP BY route_id HAVING COUNT(*) > 1;
+```
+Якщо дублі є — злити вручну в один запис з правильним km і тарифом.
