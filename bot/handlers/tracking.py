@@ -6,7 +6,7 @@ from bot.utils.time_utils import get_kyiv_time, to_kyiv_time
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
 from bot.utils.keyboards import kb_driver_idle, kb_driver_active, kb_admin_driver_idle, kb_admin_driver_active
 
@@ -156,8 +156,6 @@ async def cmd_start_route(message: Message, state: FSMContext):
     todays_route = await get_todays_finished_route(user_id)
 
     if todays_route:
-        # Продовжуємо завершений маршрут за сьогодні
-        await reactivate_route(todays_route["id"])
         route_id = todays_route["id"]
         now_dt = get_kyiv_time()
         finish_dt = (
@@ -166,17 +164,18 @@ async def cmd_start_route(message: Message, state: FSMContext):
             else now_dt
         )
         time_finish = finish_dt.strftime("%H:%M")
-        time_restart = now_dt.strftime("%H:%M")
-        date_str = now_dt.strftime("%d.%m.%Y")
-        duration_min = max(0, int((now_dt - finish_dt).total_seconds() / 60))
-        label = f"▶️ Маршрут #{route_id} продовжено!"
-        group_label = (
-            f"🔄 Маршрут {user['full_name']} поновлено після перерви\n"
-            f"⏸ Перерва з {time_finish} до {time_restart}\n"
-            f"⏱ Тривалість перерви: {duration_min} хв\n"
-            f"🕐 {time_restart} {date_str}"
+        _confirm_kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(
+                text=f"▶️ Продовжити маршрут #{route_id}",
+                callback_data=f"continue_route:{route_id}",
+            )
+        ]])
+        await message.answer(
+            f"🔄 Сьогодні вже є маршрут #{route_id}, завершений о {time_finish}.\n"
+            f"Натисни кнопку щоб продовжити його.",
+            reply_markup=_confirm_kb,
         )
-        group_time_suffix = ""  # час вже в group_label
+        return
     else:
         # Новий маршрут
         now = get_kyiv_time().isoformat()
@@ -202,6 +201,74 @@ async def cmd_start_route(message: Message, state: FSMContext):
         "📍 Надішли своє місцезнаходження для фіксації старту маршруту.",
         reply_markup=kb_admin_driver_active() if is_adm else kb_driver_active(),
     )
+
+
+# ── Callback: підтвердження продовження маршруту ─────────────────────────────
+
+@router.callback_query(F.data.startswith("continue_route:"))
+async def callback_continue_route(callback: CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+
+    if not await _approved(user_id):
+        await callback.answer("❌ Ви не авторизовані.", show_alert=True)
+        return
+
+    if await get_active_route(user_id):
+        await callback.answer("⚠️ Маршрут вже активний.", show_alert=True)
+        return
+
+    try:
+        route_id = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        await callback.answer("❌ Невірні дані.", show_alert=True)
+        return
+
+    todays_route = await get_todays_finished_route(user_id)
+    if not todays_route or todays_route["id"] != route_id:
+        await callback.answer("❌ Маршрут не знайдено або вже активний.", show_alert=True)
+        return
+
+    user = await get_user(user_id)
+    is_adm = user_id in ADMIN_IDS or user_id in SUPER_ADMIN_IDS
+
+    await reactivate_route(route_id)
+
+    now_dt = get_kyiv_time()
+    finish_dt = (
+        to_kyiv_time(datetime.fromisoformat(todays_route["end_time"]))
+        if todays_route.get("end_time")
+        else now_dt
+    )
+    time_finish = finish_dt.strftime("%H:%M")
+    time_restart = now_dt.strftime("%H:%M")
+    date_str = now_dt.strftime("%d.%m.%Y")
+    duration_min = max(0, int((now_dt - finish_dt).total_seconds() / 60))
+
+    group_label = (
+        f"🔄 Маршрут {user['full_name']} поновлено після перерви\n"
+        f"⏸ Перерва з {time_finish} до {time_restart}\n"
+        f"⏱ Тривалість перерви: {duration_min} хв\n"
+        f"🕐 {time_restart} {date_str}"
+    )
+    if not _is_silent_driver(user_id):
+        try:
+            await callback.bot.send_message(GROUP_CHAT_ID, group_label)
+        except Exception as e:
+            logger.warning("Не вдалося надіслати продовження в груповий чат: %s", e)
+
+    await state.update_data(start_route_id=route_id, start_is_adm=is_adm)
+    await state.set_state(WaypointState.waiting_for_start_location)
+
+    await callback.message.edit_text(
+        f"▶️ Маршрут #{route_id} продовжено!\n"
+        f"⏰ {now_dt.strftime('%H:%M %d.%m.%Y')}\n\n"
+        "📍 Надішли своє місцезнаходження для фіксації старту маршруту.",
+    )
+    await callback.message.answer(
+        "📍 Надішли своє місцезнаходження:",
+        reply_markup=kb_admin_driver_active() if is_adm else kb_driver_active(),
+    )
+    await callback.answer()
 
 
 # ── /end_route ────────────────────────────────────────────────────────────────

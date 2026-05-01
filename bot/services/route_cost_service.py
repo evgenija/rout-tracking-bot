@@ -59,17 +59,36 @@ async def on_route_finished(
     else:
         cost = final_km * coefficients["own_driver_cost_per_km"]
 
-    # Зберегти в P2 PostgreSQL
+    # Зберегти в P2 PostgreSQL — ідемпотентно: continuation route оновлює існуючий рядок
     try:
         async with pg_pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO daily_input
-                    (date, route_id, driver_id, driver_type, km, logistics_cost)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                """,
-                get_kyiv_time().date(), route_id, driver_id, driver_type, final_km, cost,
+            existing = await conn.fetchrow(
+                "SELECT id, km FROM daily_input WHERE route_id = $1", route_id
             )
+            if existing:
+                total_km = existing["km"] + final_km
+                if driver_type == "logistics":
+                    total_cost = _calc_logistics_cost(total_km, coefficients)
+                else:
+                    total_cost = total_km * coefficients["own_driver_cost_per_km"]
+                await conn.execute(
+                    "UPDATE daily_input SET km = $1, logistics_cost = $2 WHERE route_id = $3",
+                    total_km, total_cost, route_id,
+                )
+                logger.info(
+                    "P2 daily_input route_id %d: continuation km %.2f+%.2f=%.2f, cost %.2f→%.2f",
+                    route_id, existing["km"], final_km, total_km, cost, total_cost,
+                )
+                final_km, cost = total_km, total_cost
+            else:
+                await conn.execute(
+                    """
+                    INSERT INTO daily_input
+                        (date, route_id, driver_id, driver_type, km, logistics_cost)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    """,
+                    get_kyiv_time().date(), route_id, driver_id, driver_type, final_km, cost,
+                )
     except Exception as e:
         logger.warning("P2 daily_input save failed: %s", e)
 
