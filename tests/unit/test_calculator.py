@@ -7,6 +7,7 @@ import pytest
 from datetime import date
 from bot.services.calculator import (
     business_mode, route_mode, select_final_km, _calc_logistics_cost,
+    calc_delivery_cost_by_odo,
     calculate_daily_op_profit, DailyOpResult,
 )
 
@@ -48,6 +49,23 @@ def test_logistics_city_boundary_exact():
 def test_logistics_regional_boundary_over():
     # 387 км > 386 → область: 387*20.0 = 7740
     assert abs(_calc_logistics_cost(387.0, REAL_COEFFICIENTS) - 7740.0) < 0.01
+
+
+# ── calc_delivery_cost_by_odo ─────────────────────────────────────────────────
+
+def test_calc_delivery_cost_by_odo_logistics_city():
+    # odo_km=200 ≤ 386 → місто: 200*12.2 + 3000 = 5440
+    assert abs(calc_delivery_cost_by_odo(200.0, "logistics", REAL_COEFFICIENTS) - 5440.0) < 0.01
+
+
+def test_calc_delivery_cost_by_odo_logistics_regional():
+    # odo_km=400 > 386 → область: 400*20.0 = 8000 (без +3000)
+    assert abs(calc_delivery_cost_by_odo(400.0, "logistics", REAL_COEFFICIENTS) - 8000.0) < 0.01
+
+
+def test_calc_delivery_cost_by_odo_own_driver():
+    # odo_km=150, own: 150*18.5 = 2775 (без порогу, без +3000)
+    assert abs(calc_delivery_cost_by_odo(150.0, "own", REAL_COEFFICIENTS) - 2775.0) < 0.01
 
 
 # ── business_mode ─────────────────────────────────────────────────────────────
