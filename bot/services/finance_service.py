@@ -14,6 +14,7 @@ from bot.services.calculator import (
     calculate_daily_op_profit,
     calculate_weekly_net_profit,
     calculate_monthly_net_profit,
+    calc_delivery_cost_by_odo,
     DailyOpResult,
     WeeklyResult,
     MonthlyResult,
@@ -71,6 +72,59 @@ async def get_delivery_totals_for_date(pg_pool, target_date: date) -> tuple[floa
         return logistics, own
     except Exception as e:
         logger.warning("get_delivery_totals_for_date failed for %s: %s", target_date, e)
+        return 0.0, 0.0
+
+
+async def get_delivery_odo_totals_for_date(
+    pg_pool, target_date: date, coefficients: dict
+) -> tuple[float, float]:
+    """
+    Повертає (logistics_odo, own_odo) — вартість доставки за одометром.
+    Читає route_id з P2, бере odo_diff з P1 SQLite одним запитом.
+    Fallback: якщо odo відсутній або ≤ 0 — використовує logistics_cost з daily_input.
+    """
+    if pg_pool is None:
+        return 0.0, 0.0
+    try:
+        async with pg_pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT route_id, driver_type, logistics_cost FROM daily_input WHERE date = $1",
+                target_date,
+            )
+        if not rows:
+            return 0.0, 0.0
+
+        route_ids = [r["route_id"] for r in rows if r["route_id"] is not None]
+        odo_by_route: dict = {}
+        if route_ids:
+            placeholders = ",".join("?" * len(route_ids))
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute(
+                    f"SELECT id, odometer_start, odometer_km FROM routes WHERE id IN ({placeholders})",
+                    route_ids,
+                ) as cur:
+                    for rid, odo_start, odo_finish in await cur.fetchall():
+                        if odo_start is not None and odo_finish is not None:
+                            diff = odo_finish - odo_start
+                            if diff > 0:
+                                odo_by_route[rid] = diff
+
+        logistics_odo = 0.0
+        own_odo = 0.0
+        for row in rows:
+            odo_km = odo_by_route.get(row["route_id"]) if row["route_id"] else None
+            if odo_km is not None:
+                cost = calc_delivery_cost_by_odo(odo_km, row["driver_type"], coefficients)
+            else:
+                cost = float(row["logistics_cost"] or 0)
+            if row["driver_type"] == "logistics":
+                logistics_odo += cost
+            else:
+                own_odo += cost
+
+        return logistics_odo, own_odo
+    except Exception as e:
+        logger.warning("get_delivery_odo_totals_for_date failed for %s: %s", target_date, e)
         return 0.0, 0.0
 
 
@@ -148,8 +202,9 @@ async def get_daily_op_result(
         return None
 
     logistics, own = await get_delivery_totals_for_date(pg_pool, target_date)
+    logistics_odo, own_odo = await get_delivery_odo_totals_for_date(pg_pool, target_date, coefficients)
 
-    return calculate_daily_op_profit(
+    result = calculate_daily_op_profit(
         revenue=rev_data["revenue"],
         sales_km=rev_data["sales_km"],
         delivery_logistics=logistics,
@@ -157,6 +212,16 @@ async def get_daily_op_result(
         report_date=target_date,
         coefficients=coefficients,
     )
+    result.delivery_logistics_odo = logistics_odo
+    result.delivery_own_odo       = own_odo
+    result.delivery_total_odo     = logistics_odo + own_odo
+    result.op_profit_odo = (
+        result.revenue - result.cogs
+        - result.delivery_total_odo
+        - result.sales_km_cost
+        - result.sales_salary
+    )
+    return result
 
 
 async def get_missing_revenue_days(

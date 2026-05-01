@@ -33,13 +33,14 @@ def format_weekly_report_finance(result: WeeklyResult) -> str:
     lines += [
         "",
         f"💰 Виручка тижня:          {_fmt(result.revenue)}",
-        f"📦 Операційний прибуток:   {_fmt(result.op_profit)}",
+        f"🚛 Доставка:              -{_fmt(result.delivery_total)}  │  одометр: -{_fmt(result.delivery_total_odo)}",
+        f"📦 Операційний прибуток:   {_fmt(result.op_profit)}  │  одометр: {_fmt(result.op_profit_odo)}",
         "",
         "📉 Фіксовані витрати тижня:",
         f"   Загальні витрати:       {_fmt(result.shared_week)}",
         f"   Податки:                {_fmt(result.taxes_week)}",
         "─" * 38,
-        f"{'✅' if result.net_profit >= 0 else '🔴'} Чистий прибуток:         {_fmt(result.net_profit)}",
+        f"{'✅' if result.net_profit >= 0 else '🔴'} Чистий прибуток:         {_fmt(result.net_profit)}  │  одометр: {_fmt(result.net_profit_odo)}",
     ]
 
     if result.breakeven_day > 0 and result.days_in_week > 0:
@@ -79,17 +80,17 @@ def format_monthly_report_finance(result: MonthlyResult, month: int) -> str:
         "",
         f"💰 Виручка:                {_fmt(result.revenue)}",
         f"📦 Собівартість (70%):    -{_fmt(result.cogs)}",
-        f"🚚 Доставка:              -{_fmt(result.delivery_total)}",
+        f"🚚 Доставка:              -{_fmt(result.delivery_total)}  │  одометр: -{_fmt(result.delivery_total_odo)}",
         f"👔 Sales км:              -{_fmt(result.sales_km_cost)}",
         f"💼 Зарплата sales:        -{_fmt(result.sales_salary)}",
         "─" * 38,
-        f"📊 Операційний прибуток:   {_fmt(result.op_profit)}",
+        f"📊 Операційний прибуток:   {_fmt(result.op_profit)}  │  одометр: {_fmt(result.op_profit_odo)}",
         "",
         "📉 Фіксовані витрати:",
         f"   Загальні:              -{_fmt(result.shared)}",
         f"   Податки:               -{_fmt(result.taxes)}",
         "─" * 38,
-        f"{'✅' if result.net_profit >= 0 else '🔴'} Чистий прибуток:         {_fmt(result.net_profit)}",
+        f"{'✅' if result.net_profit >= 0 else '🔴'} Чистий прибуток:         {_fmt(result.net_profit)}  │  одометр: {_fmt(result.net_profit_odo)}",
     ]
 
     if result.breakeven_day > 0:

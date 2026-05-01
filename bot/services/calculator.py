@@ -66,6 +66,10 @@ class DailyOpResult:
     op_profit: float
     sales_km: int
     sales_km_missing: bool  # True якщо sales_km=0 при revenue>0
+    delivery_logistics_odo: float = 0.0
+    delivery_own_odo: float = 0.0
+    delivery_total_odo: float = 0.0
+    op_profit_odo: float = 0.0
 
 
 @dataclass
@@ -84,6 +88,10 @@ class WeeklyResult:
     days_in_week: int = 0
     working_days_in_month: int = 0
     monthly_fixed: float = 0.0
+    delivery_total: float = 0.0
+    delivery_total_odo: float = 0.0
+    op_profit_odo: float = 0.0
+    net_profit_odo: float = 0.0
 
 
 @dataclass
@@ -104,6 +112,9 @@ class MonthlyResult:
     revenue_vs_median_pct: Optional[float]
     is_partial: bool
     missing_days_count: int
+    delivery_total_odo: float = 0.0
+    op_profit_odo: float = 0.0
+    net_profit_odo: float = 0.0
 
 
 def _calc_logistics_cost(km: float, coefficients: dict) -> float:
@@ -112,6 +123,13 @@ def _calc_logistics_cost(km: float, coefficients: dict) -> float:
     if km <= threshold:
         return km * coefficients["logistics_city_rate"] + coefficients["logistics_city_fixed_fee"]
     return km * coefficients["logistics_regional_rate"]
+
+
+def calc_delivery_cost_by_odo(odo_km: float, driver_type: str, coefficients: dict) -> float:
+    """Вартість доставки за одометром. Та сама тарифна логіка що й final_km."""
+    if driver_type == "logistics":
+        return _calc_logistics_cost(odo_km, coefficients)
+    return odo_km * coefficients["own_driver_cost_per_km"]
 
 
 def business_mode(
@@ -319,13 +337,17 @@ def calculate_weekly_net_profit(
     effective_tax_rate = coefficients.get("effective_tax_rate", 0.0)
     revenue_median    = coefficients.get("revenue_median_2025", 0.0)
 
-    days_in_week = len(daily_results)
-    revenue_week  = sum(r.revenue for r in daily_results)
-    op_profit_sum = sum(r.op_profit for r in daily_results)
+    days_in_week       = len(daily_results)
+    revenue_week       = sum(r.revenue for r in daily_results)
+    op_profit_sum      = sum(r.op_profit for r in daily_results)
+    delivery_total     = sum(r.delivery_total for r in daily_results)
+    delivery_total_odo = sum(r.delivery_total_odo for r in daily_results)
+    op_profit_odo_sum  = sum(r.op_profit_odo for r in daily_results)
 
-    shared_week = monthly_shared * (days_in_week / working_days_in_month) if working_days_in_month > 0 else 0.0
-    taxes_week  = revenue_week * effective_tax_rate
-    net_profit  = op_profit_sum - shared_week - taxes_week
+    shared_week    = monthly_shared * (days_in_week / working_days_in_month) if working_days_in_month > 0 else 0.0
+    taxes_week     = revenue_week * effective_tax_rate
+    net_profit     = op_profit_sum - shared_week - taxes_week
+    net_profit_odo = op_profit_odo_sum - shared_week - taxes_week
 
     breakeven_day = (
         (coefficients["monthly_shared"] + coefficients["monthly_taxes"])
@@ -356,6 +378,10 @@ def calculate_weekly_net_profit(
         days_in_week=days_in_week,
         working_days_in_month=working_days_in_month,
         monthly_fixed=monthly_fixed,
+        delivery_total=delivery_total,
+        delivery_total_odo=delivery_total_odo,
+        op_profit_odo=op_profit_odo_sum,
+        net_profit_odo=net_profit_odo,
     )
 
 
@@ -375,13 +401,16 @@ def calculate_monthly_net_profit(
     monthly_taxes    = coefficients["monthly_taxes"]
     revenue_median   = coefficients.get("revenue_median_2025", 0.0)
 
-    revenue       = sum(r.revenue for r in daily_results)
-    cogs          = sum(r.cogs for r in daily_results)
-    delivery_total = sum(r.delivery_total for r in daily_results)
-    sales_km_cost = sum(r.sales_km_cost for r in daily_results)
-    sales_salary  = sum(r.sales_salary for r in daily_results)
-    op_profit     = sum(r.op_profit for r in daily_results)
-    net_profit    = op_profit - monthly_shared - monthly_taxes
+    revenue            = sum(r.revenue for r in daily_results)
+    cogs               = sum(r.cogs for r in daily_results)
+    delivery_total     = sum(r.delivery_total for r in daily_results)
+    delivery_total_odo = sum(r.delivery_total_odo for r in daily_results)
+    sales_km_cost      = sum(r.sales_km_cost for r in daily_results)
+    sales_salary       = sum(r.sales_salary for r in daily_results)
+    op_profit          = sum(r.op_profit for r in daily_results)
+    op_profit_odo      = sum(r.op_profit_odo for r in daily_results)
+    net_profit         = op_profit - monthly_shared - monthly_taxes
+    net_profit_odo     = op_profit_odo - monthly_shared - monthly_taxes
 
     breakeven_day = (
         (monthly_shared + monthly_taxes) / margin_pct / working_days
@@ -406,4 +435,7 @@ def calculate_monthly_net_profit(
         revenue_vs_median_pct=revenue_vs_median,
         is_partial=(missing_days_count > 0),
         missing_days_count=missing_days_count,
+        delivery_total_odo=delivery_total_odo,
+        op_profit_odo=op_profit_odo,
+        net_profit_odo=net_profit_odo,
     )
