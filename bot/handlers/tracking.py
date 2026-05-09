@@ -23,7 +23,6 @@ from bot.models.database import (
     get_todays_finished_route,
     get_todays_route,
     get_user,
-    get_last_finished_route_with_odo,
     mark_waypoint_suspicious,
     reactivate_route,
     save_odometer,
@@ -31,6 +30,7 @@ from bot.models.database import (
     start_route,
 )
 from bot.services.diagnostics import diagnose_route
+from bot.services.odometer_service import validate_finish_odometer, build_odo_start_alert
 from bot.services.route_comment_service import get_route_comment
 from bot.utils.geo import get_road_distance_for_route, get_cached_polyline
 from bot.utils.geo import is_spike
@@ -421,18 +421,9 @@ async def handle_finish_odometer(message: Message, state: FSMContext, pg_pool=No
         return  # стан залишається waiting_for_finish_odometer
 
     if odometer_start is not None:
-        odo_diff = odometer_km - odometer_start
-        if odo_diff <= 0:
-            await message.answer(
-                f"⚠️ Помилка: показник фінішу ({odometer_km:.0f}) менший або рівний показнику старту ({odometer_start:.0f}).\n"
-                "Перевір дані лічильника та введи ще раз:"
-            )
-            return
-        if odo_diff > 800:
-            await message.answer(
-                f"⚠️ Незвичні дані: пробіг за маршрут {odo_diff:.0f} км перевищує 800 км.\n"
-                "Перевір дані лічильника та введи ще раз:"
-            )
+        error_msg = validate_finish_odometer(odometer_start, odometer_km)
+        if error_msg:
+            await message.answer(error_msg)
             return
 
     await state.clear()
@@ -612,24 +603,8 @@ async def handle_start_odometer_input(message: Message, state: FSMContext):
     await save_odometer_start(route_id, odometer_start)
 
     try:
-        last_route = await get_last_finished_route_with_odo(message.from_user.id)
-        if last_route and last_route.get("odometer_km"):
-            prev_odo = last_route["odometer_km"]
-            route_date = last_route.get("route_date", "?")
-            diff = odometer_start - prev_odo
-            _user = await get_user(message.from_user.id)
-            driver_name = _user["full_name"] if _user else "Водій"
-            diff_emoji = "⚠️" if diff < 0 else "✅"
-            diff_text = (
-                f"сьогодні МЕНШЕ на {abs(diff):.0f} км — можлива помилка або зміна авто"
-                if diff < 0
-                else f"+{diff:.0f} км"
-            )
-            alert = (
-                f"📊 Одометр {driver_name}:\n"
-                f"Останній маршрут ({route_date}): фінішував {prev_odo:.0f} → сьогодні старт {odometer_start:.0f} км\n"
-                f"{diff_emoji} {diff_text}"
-            )
+        alert = await build_odo_start_alert(message.from_user.id, odometer_start)
+        if alert:
             for _aid in list(set(ADMIN_IDS + SUPER_ADMIN_IDS)):
                 if _aid != message.from_user.id:
                     try:
