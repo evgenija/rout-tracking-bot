@@ -32,8 +32,8 @@ def test_avg_speed_threshold_is_25():
     assert not _slow_segment_alert(50, 10)  # dist <= 60 — не alert незалежно від speed
 
 
-def test_speed_anomaly_threshold_is_150():
-    assert SPEED_ANOMALY_KMH == 150.0
+def test_speed_anomaly_threshold_is_160():
+    assert SPEED_ANOMALY_KMH == 160.0
 
 
 # ── Правило 2.1 — відображення розбіжності в P1-звіті ─────────────────────────

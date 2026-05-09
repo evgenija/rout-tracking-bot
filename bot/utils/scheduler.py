@@ -256,7 +256,7 @@ async def check_unanswered_pings(bot: Bot) -> None:
         unanswered = ping_service.get_unanswered_pings()
         for wp in unanswered:
             conn = _sqlite3.connect(DB_PATH)
-            conn.execute("UPDATE waypoints SET is_suspicious = 1 WHERE id = ?", (wp["id"],))
+            conn.execute("UPDATE waypoints SET ping_response = 'timeout' WHERE id = ?", (wp["id"],))
             conn.commit()
             conn.close()
             driver_name = wp["driver_name"] or "Водій"
@@ -268,9 +268,8 @@ async def check_unanswered_pings(bot: Bot) -> None:
             except Exception:
                 gap_minutes = 0
             alert_text = (
-                f"⚠️ {driver_name} не відповів на перевірку\n"
-                f"Без геомітки {gap_minutes} хв — "
-                f"наступні точки позначатимуться як підозрілі"
+                f"⚠️ {driver_name} не відповів на перевірку {gap_minutes} хв\n"
+                f"GPS-трекінг продовжується, дані включено у розрахунок"
             )
             for admin_id in list(set(ADMIN_IDS + SUPER_ADMIN_IDS)):
                 try:

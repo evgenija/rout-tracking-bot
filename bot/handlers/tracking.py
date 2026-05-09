@@ -23,6 +23,7 @@ from bot.models.database import (
     get_todays_finished_route,
     get_todays_route,
     get_user,
+    get_last_finished_route_with_odo,
     mark_waypoint_suspicious,
     reactivate_route,
     save_odometer,
@@ -419,6 +420,21 @@ async def handle_finish_odometer(message: Message, state: FSMContext, pg_pool=No
         )
         return  # стан залишається waiting_for_finish_odometer
 
+    if odometer_start is not None:
+        odo_diff = odometer_km - odometer_start
+        if odo_diff <= 0:
+            await message.answer(
+                f"⚠️ Помилка: показник фінішу ({odometer_km:.0f}) менший або рівний показнику старту ({odometer_start:.0f}).\n"
+                "Перевір дані лічильника та введи ще раз:"
+            )
+            return
+        if odo_diff > 800:
+            await message.answer(
+                f"⚠️ Незвичні дані: пробіг за маршрут {odo_diff:.0f} км перевищує 800 км.\n"
+                "Перевір дані лічильника та введи ще раз:"
+            )
+            return
+
     await state.clear()
 
     # Правила 2.4/3.1 — РЕБ/spoofing діагностика при ручному закритті
@@ -594,6 +610,35 @@ async def handle_start_odometer_input(message: Message, state: FSMContext):
 
     await state.clear()
     await save_odometer_start(route_id, odometer_start)
+
+    try:
+        last_route = await get_last_finished_route_with_odo(message.from_user.id)
+        if last_route and last_route.get("odometer_km"):
+            prev_odo = last_route["odometer_km"]
+            route_date = last_route.get("route_date", "?")
+            diff = odometer_start - prev_odo
+            _user = await get_user(message.from_user.id)
+            driver_name = _user["full_name"] if _user else "Водій"
+            diff_emoji = "⚠️" if diff < 0 else "✅"
+            diff_text = (
+                f"сьогодні МЕНШЕ на {abs(diff):.0f} км — можлива помилка або зміна авто"
+                if diff < 0
+                else f"+{diff:.0f} км"
+            )
+            alert = (
+                f"📊 Одометр {driver_name}:\n"
+                f"Останній маршрут ({route_date}): фінішував {prev_odo:.0f} → сьогодні старт {odometer_start:.0f} км\n"
+                f"{diff_emoji} {diff_text}"
+            )
+            for _aid in list(set(ADMIN_IDS + SUPER_ADMIN_IDS)):
+                if _aid != message.from_user.id:
+                    try:
+                        await message.bot.send_message(_aid, alert)
+                    except Exception:
+                        pass
+    except Exception as _e:
+        logger.warning("Odo start comparison failed: %s", _e)
+
     await message.answer(
         f"🚗 Одометр {odometer_start:.0f} км зафіксовано. Удачної дороги!",
         reply_markup=kb_admin_driver_active() if is_adm else kb_driver_active(),

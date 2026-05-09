@@ -281,6 +281,22 @@ async def get_todays_finished_route(driver_id: int) -> Optional[Dict]:
             return dict(row) if row else None
 
 
+async def get_last_finished_route_with_odo(driver_id: int) -> Optional[Dict]:
+    """Останній завершений маршрут водія до сьогодні (будь-який день) з одометром фінішу."""
+    today = get_kyiv_time().date().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT id, odometer_km, total_km, DATE(start_time) as route_date FROM routes
+               WHERE driver_id = ? AND is_active = 0
+               AND DATE(start_time) < ? AND odometer_km IS NOT NULL
+               ORDER BY id DESC LIMIT 1""",
+            (driver_id, today),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
 async def get_all_active_routes_today() -> List[Dict]:
     """Всі активні маршрути (незалежно від дати старту) з даними водія."""
     async with aiosqlite.connect(DB_PATH) as db:

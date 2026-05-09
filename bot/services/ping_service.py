@@ -68,8 +68,8 @@ def get_unanswered_pings() -> list[dict]:
         WHERE w.ping_sent_at IS NOT NULL
           AND w.ping_response IS NULL
           AND w.ping_sent_at < ?
-          AND w.is_suspicious = 0
           AND r.is_active = 1
+          AND w.id != (SELECT MIN(id) FROM waypoints WHERE route_id = w.route_id)
         ''',
         (cutoff,)
     ).fetchall()

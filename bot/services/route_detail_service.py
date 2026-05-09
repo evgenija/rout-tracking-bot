@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 # ── Пороги ────────────────────────────────────────────────────────────────────
 
-SPEED_ANOMALY_KMH    = 150.0   # аномальна швидкість — можливий збій GPS
+SPEED_ANOMALY_KMH    = 160.0   # аномальна швидкість — можливий збій GPS
 SPEED_SPIKE_KMH      = 500.0   # технічний збій координат
 TIME_GAP_MINUTES     = 60.0    # gap що потребує уваги
 ROUTE_RESUME_HOURS   = 3.0     # склейка маршруту (год)
@@ -81,7 +81,7 @@ def _anomaly_explanation(
         )
 
     if speed_kmh is not None and speed_kmh > SPEED_ANOMALY_KMH:
-        return "Аномальна швидкість — можливий збій GPS"
+        return "Перевищена максимальна швидкість 160 км/год — можливий збій GPS"
 
     if dist_km is not None and dist_km > MAX_DISTANCE_KM:
         return f"Великий стрибок між точками — {dist_km:.0f} км без геоміток"
@@ -104,8 +104,7 @@ def _anomaly_explanation(
 
     if curr.get("is_suspicious"):
         spd = f"{speed_kmh:.0f} км/год" if speed_kmh is not None else "—"
-        gap = f"{gap_min:.0f} хв"       if gap_min  is not None else "—"
-        return f"Низька швидкість ({spd}, {gap}). Можлива зупинка без позначки. GPS валідний."
+        return f"Занадто низька швидкість пересування ({spd}). GPS включено у розрахунок."
 
     return None
 
@@ -140,7 +139,7 @@ def _classify_segment(prev: dict, curr: dict) -> dict:
     }
 
     # 1. НЕПІДТВЕРДЖЕНИЙ ПІНГ
-    if prev.get("ping_sent_at") and not prev.get("ping_response"):
+    if prev.get("ping_sent_at") and prev.get("ping_response") in (None, "timeout"):
         return {**base, "type": "unconfirmed_ping", "explanation": None}
 
     # 2. СКЛЕЙКА МАРШРУТУ
