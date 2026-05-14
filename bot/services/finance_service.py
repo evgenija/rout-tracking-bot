@@ -128,6 +128,39 @@ async def get_delivery_odo_totals_for_date(
         return 0.0, 0.0
 
 
+async def get_delivery_totals_for_range(
+    pg_pool, start_date: date, end_date: date
+) -> tuple[float, float]:
+    """
+    Повертає (logistics_total, own_total) з daily_input за діапазон дат.
+    Незалежна від period_input — показує реальні витрати навіть без введеної виручки.
+    """
+    if pg_pool is None:
+        return 0.0, 0.0
+    try:
+        async with pg_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT driver_type, SUM(logistics_cost) AS total_cost
+                FROM daily_input
+                WHERE date BETWEEN $1 AND $2
+                GROUP BY driver_type
+                """,
+                start_date, end_date,
+            )
+        logistics = 0.0
+        own = 0.0
+        for row in rows:
+            if row["driver_type"] == "logistics":
+                logistics = float(row["total_cost"] or 0)
+            else:
+                own = float(row["total_cost"] or 0)
+        return logistics, own
+    except Exception as e:
+        logger.warning("get_delivery_totals_for_range failed for %s–%s: %s", start_date, end_date, e)
+        return 0.0, 0.0
+
+
 async def get_revenue_for_date(pg_pool, target_date: date) -> Optional[dict]:
     """
     Повертає {revenue, sales_km} з period_input де date_from <= target_date <= date_to.
@@ -291,23 +324,37 @@ async def build_weekly_result(
     missing = await get_missing_revenue_days(pg_pool, week_start, week_end)
     working_days = await get_working_days_in_month(pg_pool, week_start.year, week_start.month)
 
+    # Delivery totals — завжди, незалежно від наявності виручки
+    w_logistics, w_own = await get_delivery_totals_for_range(pg_pool, week_start, week_end)
+    weekly_delivery = w_logistics + w_own
+
+    # Breakeven і monthly_fixed — залежать тільки від коефіцієнтів, не від виручки
+    breakeven_day = (
+        (coefficients["monthly_shared"] + coefficients["monthly_taxes"])
+        / coefficients["margin_pct"] / working_days
+        if working_days > 0 else 0.0
+    )
+    monthly_fixed = coefficients["monthly_shared"] + coefficients["monthly_taxes"]
+
     daily_results = []
     d = week_start
     while d <= week_end:
-        result = await get_daily_op_result(pg_pool, d, coefficients)
-        if result is not None:
-            daily_results.append(result)
+        day_result = await get_daily_op_result(pg_pool, d, coefficients)
+        if day_result is not None:
+            daily_results.append(day_result)
         d += timedelta(days=1)
 
     if not daily_results:
-        # Повністю порожній тиждень
         from bot.services.calculator import WeeklyResult as WR
         return WR(
             week_start=week_start, week_end=week_end,
             revenue=0, op_profit=0, shared_week=0, taxes_week=0,
-            net_profit=0, breakeven_day=0, revenue_vs_median_pct=None,
+            net_profit=0, breakeven_day=breakeven_day,
+            revenue_vs_median_pct=None,
             is_partial=True, missing_days=missing,
-            days_in_week=0, working_days_in_month=working_days, monthly_fixed=0.0,
+            days_in_week=0, working_days_in_month=working_days,
+            monthly_fixed=monthly_fixed,
+            delivery_total=weekly_delivery,
         )
 
     result = calculate_weekly_net_profit(
@@ -319,6 +366,8 @@ async def build_weekly_result(
     )
     result.is_partial = len(missing) > 0
     result.missing_days = missing
+    # Delivery — повна сума тижня з daily_input (включно з днями без виручки)
+    result.delivery_total = weekly_delivery
     return result
 
 

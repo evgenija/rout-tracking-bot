@@ -166,6 +166,64 @@ def test_monthly_revenue_vs_median():
 # ── finance_service helpers ───────────────────────────────────────────────────
 
 @pytest.mark.asyncio
+async def test_get_delivery_totals_for_range_no_pool():
+    from bot.services.finance_service import get_delivery_totals_for_range
+    logistics, own = await get_delivery_totals_for_range(None, date(2026, 5, 11), date(2026, 5, 14))
+    assert logistics == 0.0
+    assert own == 0.0
+
+
+@pytest.mark.asyncio
+async def test_get_delivery_totals_for_range_from_mock_pool():
+    from bot.services.finance_service import get_delivery_totals_for_range
+
+    mock_conn = AsyncMock()
+    mock_conn.fetch.return_value = [
+        {"driver_type": "logistics", "total_cost": 28000.0},
+        {"driver_type": "own",       "total_cost": 5500.0},
+    ]
+    mock_pool = MagicMock()
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__  = AsyncMock(return_value=False)
+
+    logistics, own = await get_delivery_totals_for_range(mock_pool, date(2026, 5, 11), date(2026, 5, 14))
+    assert logistics == 28000.0
+    assert own == 5500.0
+
+
+@pytest.mark.asyncio
+async def test_build_weekly_result_no_revenue_shows_delivery_and_breakeven():
+    """Якщо виручки немає — delivery_total і breakeven_day мають бути ненульовими."""
+    from bot.services.finance_service import build_weekly_result
+    from unittest.mock import patch
+
+    # get_delivery_totals_for_range повертає реальні витрати
+    # get_working_days_in_month повертає 13 (травень до 14-го)
+    # get_missing_revenue_days повертає [May 12, May 13]
+    # get_daily_op_result завжди повертає None (виручки немає)
+    with (
+        patch("bot.services.finance_service.get_delivery_totals_for_range", new=AsyncMock(return_value=(28000.0, 5500.0))),
+        patch("bot.services.finance_service.get_working_days_in_month", new=AsyncMock(return_value=13)),
+        patch("bot.services.finance_service.get_missing_revenue_days", new=AsyncMock(return_value=[date(2026, 5, 12), date(2026, 5, 13)])),
+        patch("bot.services.finance_service.get_daily_op_result", new=AsyncMock(return_value=None)),
+    ):
+        result = await build_weekly_result(
+            pg_pool=MagicMock(),
+            week_start=date(2026, 5, 11),
+            week_end=date(2026, 5, 14),
+            coefficients=COEFFS,
+        )
+
+    assert result.delivery_total == 28000.0 + 5500.0
+    assert result.breakeven_day > 0
+    expected_breakeven = (292555.0 + 14549.0) / 0.3 / 13
+    assert abs(result.breakeven_day - expected_breakeven) < 0.01
+    assert result.monthly_fixed == 292555.0 + 14549.0
+    assert result.revenue == 0
+    assert result.is_partial is True
+
+
+@pytest.mark.asyncio
 async def test_get_delivery_totals_no_pool():
     from bot.services.finance_service import get_delivery_totals_for_date
     logistics, own = await get_delivery_totals_for_date(None, date(2026, 4, 27))
