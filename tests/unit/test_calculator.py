@@ -194,6 +194,54 @@ def test_select_final_km_no_odometer():
     assert km == 100.0
 
 
+# ── select_final_km — logistics (поріг 9.5%) ─────────────────────────────────
+
+LOGISTICS_COEFFICIENTS = {
+    **REAL_COEFFICIENTS,
+    "odometer_over_tracking_threshold": 0.095,  # logistics: 9.5%
+}
+
+
+def test_select_final_km_logistics_within_9pct():
+    # odo > tracking на 9% < 9.5% → одометр
+    km, reason = select_final_km(100.0, 109.0, LOGISTICS_COEFFICIENTS)
+    assert reason == "within_tolerance"
+    assert km == 109.0
+
+
+def test_select_final_km_logistics_boundary_exact():
+    # odo > tracking рівно на 9.5% — включно в поріг → одометр
+    km, reason = select_final_km(100.0, 109.5, LOGISTICS_COEFFICIENTS)
+    assert reason == "within_tolerance"
+    assert km == 109.5
+
+
+def test_select_final_km_logistics_inflated_above_095():
+    # odo > tracking на 9.6% > 9.5% → трекінг
+    km, reason = select_final_km(100.0, 109.6, LOGISTICS_COEFFICIENTS)
+    assert reason == "odometer_inflated"
+    assert km == 100.0
+
+
+def test_select_final_km_logistics_inflated_above_threshold():
+    # odo > tracking на 10% > 9.5% → трекінг
+    km, reason = select_final_km(100.0, 110.0, LOGISTICS_COEFFICIENTS)
+    assert reason == "odometer_inflated"
+    assert km == 100.0
+
+
+def test_select_final_km_logistics_tracking_over_odo_small():
+    # tracking > odo (3%) → завжди одометр
+    km, reason = select_final_km(100.0, 97.0, LOGISTICS_COEFFICIENTS)
+    assert km == 97.0
+
+
+def test_select_final_km_logistics_tracking_over_odo_large():
+    # tracking > odo (15%) → завжди одометр
+    km, reason = select_final_km(100.0, 85.0, LOGISTICS_COEFFICIENTS)
+    assert km == 85.0
+
+
 # ── calculate_daily_op_profit ─────────────────────────────────────────────────
 
 def test_daily_op_profit_smoke():

@@ -38,7 +38,13 @@ async def on_route_finished(
     odometer_km: delta одометра (odometer_finish - odometer_start), або None якщо відсутній
     pg_pool: існуючий asyncpg pool (не створювати новий)
     """
-    final_km, reason = select_final_km(tracking_km, odometer_km, coefficients)
+    _coeff = coefficients
+    if driver_type == "logistics":
+        _coeff = dict(coefficients)
+        _coeff["odometer_over_tracking_threshold"] = _coeff.get(
+            "logistics_odometer_over_tracking_threshold", 0.095
+        )
+    final_km, reason = select_final_km(tracking_km, odometer_km, _coeff)
 
     if reason == 'odometer_missing':
         alert_text = (

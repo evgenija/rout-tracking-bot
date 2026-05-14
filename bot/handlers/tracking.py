@@ -70,6 +70,7 @@ def _format_odometer_accuracy(
     total_km: float,
     odometer_start,
     odometer_km,
+    round_pct: bool = False,
 ) -> tuple:
     """Повертає (текст_секції, потрібен_алерт).
 
@@ -97,11 +98,12 @@ def _format_odometer_accuracy(
             label = "🔶"
         else:
             label = "🔴"
+        pct_str = f"{int(round(diff_pct))}%" if round_pct else f"{diff_pct:.1f}%"
         text = (
             f"📌 Одометр: {odometer_start:.0f} → {odometer_km:.0f} км\n"
             f"   Пробіг за одометром: {odometer_diff:.1f} км\n"
             f"   Трекінг: {total_km:.2f} км\n"
-            f"   Похибка: {diff_pct:.1f}%  {label}"
+            f"   Похибка: {pct_str}  {label}"
         )
         return text, diff_pct > 25
 
@@ -486,27 +488,33 @@ async def handle_finish_odometer(message: Message, state: FSMContext, pg_pool=No
     except Exception as _e:
         logger.warning("P2 route cost hook failed: %s", _e)
 
-    odo_section, should_alert = _format_odometer_accuracy(total_km, odometer_start, odometer_km)
+    odo_section_driver, should_alert = _format_odometer_accuracy(
+        total_km, odometer_start, odometer_km, round_pct=True
+    )
+    odo_section_admin, _ = _format_odometer_accuracy(total_km, odometer_start, odometer_km)
 
     _odo_diff = None
     if odometer_km is not None and odometer_start is not None and odometer_km > odometer_start:
         _odo_diff = odometer_km - odometer_start
     _comment = get_route_comment(user_name, _odo_diff, total_km)
 
-    summary = (
+    _base = (
         f"🏁 Маршрут #{route_id} завершено!\n\n"
         f"👤 {user_name}\n"
         f"📍 Точок: {wp_count}\n"
         f"⏱ Тривалість: {duration}\n"
         f"🕐 {start_hm} → {finish_hm}  {finish_date}\n\n"
-        f"{odo_section}"
     )
+    summary = _base + odo_section_driver        # водій + загальний чат
+    admin_summary = _base + odo_section_admin   # адміни
+
     if _comment:
         summary += f"\n\n{_comment}"
+        admin_summary += f"\n\n{_comment}"
 
     await message.answer(summary, reply_markup=kb_admin_driver_idle() if is_adm else kb_driver_idle())
 
-    admin_msg = summary
+    admin_msg = admin_summary
     if should_alert:
         admin_msg += f"\n\n⚠️ Велика розбіжність по маршруту {user_name} — перевір!"
 
