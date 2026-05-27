@@ -71,10 +71,14 @@ async def main():
     dp = Dispatcher(storage=MemoryStorage())
 
     if PG_DATABASE_URL:
-        pg_pool = await asyncpg.create_pool(PG_DATABASE_URL)
-        await create_p2_tables(pg_pool)
-        dp["pg_pool"] = pg_pool
-        logger.info("P2 PostgreSQL pool ініціалізовано.")
+        try:
+            pg_pool = await asyncpg.create_pool(PG_DATABASE_URL)
+            await create_p2_tables(pg_pool)
+            dp["pg_pool"] = pg_pool
+            logger.info("P2 PostgreSQL pool ініціалізовано.")
+        except Exception as e:
+            pg_pool = None
+            logger.error("P2 PostgreSQL недоступний при старті: %s — P2 функції вимкнено.", e)
     else:
         pg_pool = None
         logger.warning("PG_DATABASE_URL не задано — P2 функції вимкнено.")
