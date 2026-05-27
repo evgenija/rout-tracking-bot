@@ -30,6 +30,19 @@ Route tracking + фінансова модель (P&L) для логістичн
 ## Деплой
 - Бот активний вдень. **Push тільки після 20:00 Київ** якщо деплой зупиняє бота.
 - `git push` — тільки після явного «пушимо» від Жені.
+- Перед пушем у робочий час — перевіряти активні маршрути через P1 SQLite:
+```bash
+# Записати локально, передати через base64:
+# SELECT id FROM routes WHERE is_active = 1 AND DATE(start_time) = DATE('now', '+3 hours')
+B64=$(base64 -i /tmp/chk_p1.py | tr -d '\n') && railway ssh sh -c "'echo $B64 | base64 -d > /tmp/c.py && python3 /tmp/c.py'"
+```
+Якщо `Активних маршрутів зараз: 0` — пушити можна в будь-який час.
+
+## Railway Infrastructure
+- При `CRASHED` worker → **завжди перевіряти PostgreSQL сервіс окремо** в Railway дашборді (не тільки worker)
+- `Restart` не завжди допомагає при `catatonit: failed to exec pid1` → потрібен **Redeploy** PostgreSQL
+- `railway login` не працює в Claude Code (non-interactive mode) → запускати в окремому **Terminal.app**
+- Після Redeploy PostgreSQL → Redeploy worker (він не перепідключається автоматично)
 
 ---
 
@@ -235,6 +248,8 @@ BOT_TOKEN у `.env` може бути застарілим — актуальн�
 - `period_input` — виручка + sales_km; підтримує діапазони (date_from, date_to)
 - `daily_input` — дані доставки по водіях; заповнюється автоматично після кожного завершення маршруту в P1
 - `coefficients` — коефіцієнти (margin_pct, monthly_shared, monthly_taxes, revenue_median_2025 та ін.)
+
+> ⚠️ **Правило коефіцієнтів**: будь-який новий коефіцієнт → обов'язково додати в `db_init_p2.py` у seed loop з `ON CONFLICT (key) DO NOTHING`. Ніколи не вводити тільки через SQL — при reset БД дані зникнуть. Інцидент 27.05.2026: 6 коефіцієнтів зникли після Railway reset, 21 маршрут без розрахунку вартості.
 
 > ⚠️ `sales_cost_per_km` **не зберігається в БД** — обраховується динамічно в `CoefficientsService._load()` з компонент пального. Оновлювати через `/set_fuel` або авто-щотижня. Не шукати в таблиці coefficients.
 
