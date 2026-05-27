@@ -85,6 +85,15 @@ async def create_p2_tables(pool):
             ("sales_amortization_per_km",   0.80,  "Амортизація авто sales managers грн/км"),
             ("effective_tax_rate",          0.00216, "Ефективна ставка податку: taxes_median/revenue_median_2025"),
             ("revenue_median_2025",      6737667.0, "Медіана місячного revenue 2025 (грн). Для порівняння у звітах."),
+            # Критичні коефіцієнти для P&L і розрахунку вартості маршрутів.
+            # DO NOTHING — не перезаписувати якщо вже є у БД (наприклад після ручного оновлення).
+            ("margin_pct",                    0.3,     "Маржинальність (30% — частка GP від виручки)"),
+            ("logistics_city_rate",           12.2,    "Тариф логістики місто (грн/км)"),
+            ("logistics_regional_rate",       20.0,    "Тариф логістики область (грн/км)"),
+            ("logistics_city_fixed_fee",    3000.0,    "Фіксована надбавка логістика місто (грн)"),
+            ("logistics_city_threshold_km",  386.0,    "Поріг місто/область для логістики (км)"),
+            ("logistics_odometer_over_tracking_threshold", 0.095,
+             "Поріг одометр > трекінг для логістики (9.5%)"),
         ]:
             await conn.execute(
                 "INSERT INTO coefficients (key, value, description) VALUES ($1, $2, $3) "

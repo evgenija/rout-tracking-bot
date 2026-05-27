@@ -175,18 +175,68 @@ if message.from_user.id not in SUPER_ADMIN_IDS:
 
 **P1 SQLite** (`bot.db`) — файл на `worker-volume` Railway. Локальний `bot.db` **завжди порожній** — не читати локально, не аналізувати. Доступ тільки через `railway ssh`.
 
-**P2 PostgreSQL** — Public Networking увімкнено. Запити з локальної машини:
+**P2 PostgreSQL** — `postgres-volume` на Railway.
+- `PG_DATABASE_URL` (`postgres.railway.internal`) — тільки з Railway мережі, локально не працює.
+- `DATABASE_PUBLIC_URL` в `.env` — Public Networking URL. **Може бути застарілим** після скидання БД. Перевіряти перед використанням: `psql "$DATABASE_PUBLIC_URL" -c "SELECT 1;"`. Якщо не відповідає — railway ssh.
+
+### ❌ Що НЕ працює для P2 з локальної машини
+- `railway run python3 -c "asyncpg.connect(...)"` — internal host недоступний локально
+- `psql $PG_DATABASE_URL` — те саме
+- `railway connect postgres` — відкриває інтерактивну сесію, в Claude Code не працює
+- Public Networking — платна опція, може бути вимкнена або URL застарілий після reset БД
+
+### ✅ Єдиний надійний спосіб — railway ssh + base64
 ```bash
-psql "$DATABASE_PUBLIC_URL" -c "SELECT ..."
+B64=$(base64 -i /path/to/script.py | tr -d '\n')
+railway ssh sh -c "'echo $B64 | base64 -d > /tmp/run.py && python3 /tmp/run.py'" 2>&1
 ```
-URL в `.env` як `DATABASE_PUBLIC_URL`. Внутрішній `PG_DATABASE_URL` — тільки з Railway мережі, локально не працює.
+Скрипт писати локально в `scripts/_tmp_*.py`, передавати через base64.
+
+### Шаблон перевірки coefficients (через railway ssh)
+```python
+import asyncio, os, asyncpg
+async def main():
+    conn = await asyncpg.connect(os.environ['PG_DATABASE_URL'])
+    rows = await conn.fetch('SELECT key, value FROM coefficients ORDER BY key;')
+    for r in rows: print(dict(r))
+    await conn.close()
+asyncio.run(main())
+```
+
+### Шаблон INSERT коефіцієнтів
+```sql
+INSERT INTO coefficients (key, value, description) VALUES
+('key_name', 0.0, 'опис')
+ON CONFLICT (key) DO NOTHING;
+```
 
 Якщо треба проаналізувати дані маршруту — йти одразу в P2 (`daily_input`), не в P1.
 
+### P1 SQLite — схема routes (важливо)
+`routes.odometer_km` — **абсолютне** фінальне показання одометра (не дельта).
+Дельта км = `odometer_km - odometer_start`.
+В коді `on_route_finished(odometer_km=...)` параметр — вже дельта (обчислюється у handler перед викликом).
+
+### Railway variables — не обрізати токени
+`railway variables` (таблиця) **обрізає** довгі значення. Для BOT_TOKEN і подібних — завжди:
+```bash
+railway variables --json | python3 -c "import sys,json; v=json.load(sys.stdin); print(v['BOT_TOKEN'])"
+```
+BOT_TOKEN у `.env` може бути застарілим — актуальний лише в Railway.
+
+### Протокол після деплою змін порогу одометра
+Після кожного деплою що змінює `odometer_over_tracking_threshold`:
+1. Перевірити сьогоднішні маршрути в P2: `SELECT route_id, driver_type, km FROM daily_input WHERE date = CURRENT_DATE`
+2. Отримати odo дані з P1 via `railway ssh`: `SELECT id, total_km, odometer_start, odometer_km FROM routes WHERE id IN (...)`
+3. Для логістики: `odo_diff = odometer_km - odometer_start`; якщо `p2.km ≈ tracking` (трекінг використовувався) — перевірити чи `(odo_diff - p2.km) / p2.km` потрапляє в нову сіру зону (старий_поріг < % ≤ новий_поріг)
+4. Якщо так — UPDATE daily_input + сповіщення супер-адміну
+
 ## Таблиці P2
 - `period_input` — виручка + sales_km; підтримує діапазони (date_from, date_to)
-- `daily_input` — дані доставки по водіях
+- `daily_input` — дані доставки по водіях; заповнюється автоматично після кожного завершення маршруту в P1
 - `coefficients` — коефіцієнти (margin_pct, monthly_shared, monthly_taxes, revenue_median_2025 та ін.)
+
+> ⚠️ `sales_cost_per_km` **не зберігається в БД** — обраховується динамічно в `CoefficientsService._load()` з компонент пального. Оновлювати через `/set_fuel` або авто-щотижня. Не шукати в таблиці coefficients.
 
 ## P2 daily_input — перевірка дублів (для аналізу старих даних)
 `on_route_finished()` з 01.05.2026 ідемпотентний: SELECT перед INSERT, при continuation → UPDATE.

@@ -329,10 +329,11 @@ async def build_weekly_result(
     weekly_delivery = w_logistics + w_own
 
     # Breakeven і monthly_fixed — залежать тільки від коефіцієнтів, не від виручки
+    _margin_pct = coefficients.get("margin_pct")
     breakeven_day = (
         (coefficients["monthly_shared"] + coefficients["monthly_taxes"])
-        / coefficients["margin_pct"] / working_days
-        if working_days > 0 else 0.0
+        / _margin_pct / working_days
+        if working_days > 0 and _margin_pct else 0.0
     )
     monthly_fixed = coefficients["monthly_shared"] + coefficients["monthly_taxes"]
 
