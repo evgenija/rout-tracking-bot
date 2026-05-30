@@ -30,7 +30,7 @@ from bot.models.database import (
     start_route,
 )
 from bot.services.diagnostics import diagnose_route
-from bot.services.odometer_service import validate_finish_odometer, build_odo_start_alert
+from bot.services.odometer_service import validate_finish_odometer, build_odo_start_alert, build_geo_mismatch_line
 from bot.services.route_comment_service import get_route_comment
 from bot.utils.geo import get_road_distance_for_route, get_cached_polyline
 from bot.utils.geo import is_spike
@@ -612,6 +612,9 @@ async def handle_start_odometer_input(message: Message, state: FSMContext):
 
     try:
         alert = await build_odo_start_alert(message.from_user.id, odometer_start)
+        geo_line = await build_geo_mismatch_line(route_id, odometer_start, message.from_user.id)
+        if alert and geo_line:
+            alert += geo_line
         if alert:
             for _aid in list(set(ADMIN_IDS + SUPER_ADMIN_IDS)):
                 if _aid != message.from_user.id:

@@ -297,6 +297,25 @@ async def get_last_finished_route_with_odo(driver_id: int) -> Optional[Dict]:
             return dict(row) if row else None
 
 
+async def get_last_route_by_odometer(odometer_start: float, threshold: float = 50.0) -> Optional[Dict]:
+    """Останній завершений маршрут будь-якого водія з odometer_km близьким до odometer_start.
+
+    Використовується для ідентифікації машини при зміні водія: якщо odometer_start поточного
+    маршруту ≈ odometer_km попереднього — це та сама машина.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT id, driver_id, odometer_km FROM routes
+               WHERE is_active = 0 AND odometer_km IS NOT NULL
+               AND ABS(odometer_km - ?) <= ?
+               ORDER BY id DESC LIMIT 1""",
+            (odometer_start, threshold),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
 async def get_all_active_routes_today() -> List[Dict]:
     """Всі активні маршрути (незалежно від дати старту) з даними водія."""
     async with aiosqlite.connect(DB_PATH) as db:
