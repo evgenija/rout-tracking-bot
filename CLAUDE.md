@@ -37,6 +37,7 @@ Route tracking + фінансова модель (P&L) для логістичн
 B64=$(base64 -i /tmp/chk_p1.py | tr -d '\n') && railway ssh sh -c "'echo $B64 | base64 -d > /tmp/c.py && python3 /tmp/c.py'"
 ```
 Якщо `Активних маршрутів зараз: 0` — пушити можна в будь-який час.
+Перевірку виконувати **самостійно** перед кожним push і повідомляти результат — не питати Женю.
 
 ## Railway Infrastructure
 - При `CRASHED` worker → **завжди перевіряти PostgreSQL сервіс окремо** в Railway дашборді (не тільки worker)
@@ -76,6 +77,14 @@ PostgreSQL / SQLite
 
 **Правило:** Handler = маршрутизація + виклик сервісу. Крапка.
 Якщо бачу логіку в handler — ЗУПИНЯЮСЬ і питаю.
+
+### Флоу старту маршруту (важливо для задач з waypoints)
+```
+handle_start_location → add_waypoint("Старт") → waiting_for_start_odometer
+handle_start_odometer_input → save_odometer_start → build_odo_start_alert
+```
+Waypoint "Старт" зберігається **до** введення одометра.
+В момент надсилання одометрового алерту — перша геомітка вже є в `waypoints`.
 
 ## IP захист
 | Файл | Тип | Правило |
@@ -262,6 +271,16 @@ FROM daily_input
 GROUP BY route_id HAVING COUNT(*) > 1;
 ```
 Якщо дублі є — злити вручну в один запис з правильним km і тарифом.
+
+---
+
+### P1 — існуючі утиліти (не дублювати)
+| Функція | Файл | Призначення |
+|---|---|---|
+| `haversine(lat1, lon1, lat2, lon2)` | `bot/utils/geo.py` | Відстань між GPS-точками (км). Імпортувати звідси, не писати нову. |
+| `get_last_waypoint(route_id)` | `bot/models/database.py` | Остання геомітка маршруту |
+| `get_route_waypoints(route_id)` | `bot/models/database.py` | Всі геомітки маршруту |
+| `get_last_route_by_odometer(odometer_start, threshold=50.0)` | `bot/models/database.py` | Пошук попереднього маршруту по одометру (±50 км, будь-який водій) — ідентифікація машини при зміні водія |
 
 ---
 

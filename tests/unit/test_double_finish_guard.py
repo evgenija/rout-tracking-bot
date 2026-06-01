@@ -10,8 +10,8 @@ from bot.services.calculator import _calc_logistics_cost
 
 
 COEFFICIENTS = {
-    "logistics_city_rate": 12.2,
-    "logistics_regional_rate": 20.0,
+    "logistics_city_rate": 11.9,
+    "logistics_regional_rate": 20.7,
     "logistics_city_fixed_fee": 3000.0,
     "logistics_city_threshold_km": 386.0,
     "own_driver_cost_per_km": 18.5,
@@ -25,8 +25,8 @@ def test_fixed_fee_charged_twice_without_guard():
     km1, km2 = 97.85, 17.69
     cost_separate = _calc_logistics_cost(km1, COEFFICIENTS) + _calc_logistics_cost(km2, COEFFICIENTS)
     cost_merged = _calc_logistics_cost(km1 + km2, COEFFICIENTS)
-    assert abs(cost_separate - 7409.59) < 0.1
-    assert abs(cost_merged - 4409.59) < 0.1
+    assert abs(cost_separate - 7374.93) < 0.1
+    assert abs(cost_merged - 4374.93) < 0.1
     # Різниця = рівно одна зайва фіксована надбавка
     assert abs(cost_separate - cost_merged - 3000.0) < 0.1
 
@@ -66,7 +66,7 @@ async def test_on_route_finished_continuation_updates_not_inserts():
     total_km = mock_conn.execute.call_args[0][1]
     total_cost = mock_conn.execute.call_args[0][2]
     assert abs(total_km - 115.54) < 0.01, f"Очікувалось 115.54 км, отримано {total_km}"
-    assert abs(total_cost - 4409.59) < 0.1, f"Очікувалось 4409.59 грн, отримано {total_cost}"
+    assert abs(total_cost - 4374.93) < 0.1, f"Очікувалось 4374.93 грн, отримано {total_cost}"
 
 
 @pytest.mark.asyncio

@@ -88,8 +88,8 @@ async def create_p2_tables(pool):
             # Критичні коефіцієнти для P&L і розрахунку вартості маршрутів.
             # DO NOTHING — не перезаписувати якщо вже є у БД (наприклад після ручного оновлення).
             ("margin_pct",                    0.3,     "Маржинальність (30% — частка GP від виручки)"),
-            ("logistics_city_rate",           12.2,    "Тариф логістики місто (грн/км)"),
-            ("logistics_regional_rate",       20.0,    "Тариф логістики область (грн/км)"),
+            ("logistics_city_rate",           11.9,    "Тариф логістики місто (грн/км)"),
+            ("logistics_regional_rate",       20.7,    "Тариф логістики область (грн/км)"),
             ("logistics_city_fixed_fee",    3000.0,    "Фіксована надбавка логістика місто (грн)"),
             ("logistics_city_threshold_km",  386.0,    "Поріг місто/область для логістики (км)"),
             ("logistics_odometer_over_tracking_threshold", 0.095,
