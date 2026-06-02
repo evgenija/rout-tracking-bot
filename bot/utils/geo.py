@@ -271,25 +271,38 @@ async def is_suspicious(
 _SPIKE_MIN_JUMP_KM: float = 20.0
 # Якщо B→C < A→B * коефіцієнт — C "повернулась", тобто B = spike
 _SPIKE_RETURN_RATIO: float = 0.3
+# Максимальна реальна швидкість на дорозі — вище означає GPS-артефакт
+_SPIKE_SPEED_THRESHOLD_KMH: float = 130.0
 
 
 def is_spike(
     lat_a: float, lon_a: float,
     lat_b: float, lon_b: float,
     lat_c: float, lon_c: float,
+    time_a=None,
+    time_b=None,
 ) -> bool:
     """Повертає True якщо точка B є GPS spike між A і C.
 
-    Умова (правило 1.6):
-      1. dist(A, B) > _SPIKE_MIN_JUMP_KM (20 км) — стрибок далеко
-      2. dist(B, C) < dist(A, B) * _SPIKE_RETURN_RATIO (0.3) — наступна повернулась
+    Якщо передані time_a і time_b (datetime): перевіряємо швидкість A→B.
+    Швидкість ≤ 130 км/год → B реальна точка → не spike, незалежно від геометрії.
+    Швидкість > 130 км/год → застосовується геометрична перевірка dist(B,C).
+
+    Без timestamps: тільки геометрична перевірка (backward compatible).
 
     Викликається ретроспективно: коли надходить C, перевіряємо чи B є спайком.
-    Якщо наступної точки ще немає — не викликати.
     """
     dist_ab = haversine(lat_a, lon_a, lat_b, lon_b)
     if dist_ab <= _SPIKE_MIN_JUMP_KM:
         return False
+
+    if time_a is not None and time_b is not None:
+        secs = (time_b - time_a).total_seconds()
+        if secs > 0:
+            speed_kmh = dist_ab / secs * 3600
+            if speed_kmh <= _SPIKE_SPEED_THRESHOLD_KMH:
+                return False
+
     dist_bc = haversine(lat_b, lon_b, lat_c, lon_c)
     return dist_bc < dist_ab * _SPIKE_RETURN_RATIO
 

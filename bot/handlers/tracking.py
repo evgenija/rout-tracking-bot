@@ -707,6 +707,8 @@ async def handle_waypoint_name(message: Message, state: FSMContext):
             wp_a["lat"], wp_a["lon"],
             wp_b["lat"], wp_b["lon"],
             wp_c["lat"], wp_c["lon"],
+            time_a=datetime.fromisoformat(wp_a["timestamp"]),
+            time_b=datetime.fromisoformat(wp_b["timestamp"]),
         ):
             await mark_waypoint_suspicious(wp_b["id"])
             logger.info("GPS spike: waypoint id=%d (route=%d) позначено як suspicious", wp_b["id"], route_id)
