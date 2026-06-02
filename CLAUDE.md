@@ -265,6 +265,12 @@ BOT_TOKEN у `.env` може бути застарілим — актуальн�
 ## P2 daily_input — перевірка дублів (для аналізу старих даних)
 `on_route_finished()` з 01.05.2026 ідемпотентний: SELECT перед INSERT, при continuation → UPDATE.
 Для аналізу даних **до** цього фіксу — перевіряти дублі:
+
+> ⚠️ **`/recompute_routes` для діапазону дат охоплює ВСІ маршрути дня**, не тільки конкретний.
+> Якщо `total_km` змінюється після перерахунку — `daily_input` **не оновлюється автоматично**.
+> Після будь-якого `/recompute` — перевіряти та вручну оновлювати `daily_input.km` і `logistics_cost`
+> для зачеплених маршрутів. Інцидент 02.06.2026: recompute для #217 змінив `total_km` #216 ZAZA,
+> але `daily_input` залишився зі старим значенням (375.5 → мало бути 402.9 км).
 ```sql
 SELECT route_id, COUNT(*), SUM(km), SUM(logistics_cost)
 FROM daily_input
@@ -278,6 +284,7 @@ GROUP BY route_id HAVING COUNT(*) > 1;
 | Функція | Файл | Призначення |
 |---|---|---|
 | `haversine(lat1, lon1, lat2, lon2)` | `bot/utils/geo.py` | Відстань між GPS-точками (км). Імпортувати звідси, не писати нову. |
+| `is_spike(lat_a, lon_a, lat_b, lon_b, lat_c, lon_c, time_a=None, time_b=None)` | `bot/utils/geo.py` | GPS spike detector. З timestamps: швидкість A→B ≤ 130 км/год → не spike (реальна точка). Без timestamps → тільки геометрична перевірка (backward compatible). Поріг: `_SPIKE_SPEED_THRESHOLD_KMH = 130.0`. |
 | `get_last_waypoint(route_id)` | `bot/models/database.py` | Остання геомітка маршруту |
 | `get_route_waypoints(route_id)` | `bot/models/database.py` | Всі геомітки маршруту |
 | `get_last_route_by_odometer(odometer_start, threshold=50.0)` | `bot/models/database.py` | Пошук попереднього маршруту по одометру (±50 км, будь-який водій) — ідентифікація машини при зміні водія |
