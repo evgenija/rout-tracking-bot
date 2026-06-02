@@ -612,7 +612,7 @@ async def handle_start_odometer_input(message: Message, state: FSMContext):
 
     try:
         alert = await build_odo_start_alert(message.from_user.id, odometer_start)
-        geo_line = await build_geo_mismatch_line(route_id, odometer_start, message.from_user.id)
+        geo_line, cheat_alert = await build_geo_mismatch_line(route_id, odometer_start, message.from_user.id)
         if alert and geo_line:
             alert += geo_line
         if alert:
@@ -620,6 +620,13 @@ async def handle_start_odometer_input(message: Message, state: FSMContext):
                 if _aid != message.from_user.id:
                     try:
                         await message.bot.send_message(_aid, alert)
+                    except Exception:
+                        pass
+        if cheat_alert:
+            for _sid in SUPER_ADMIN_IDS:
+                if _sid != message.from_user.id:
+                    try:
+                        await message.bot.send_message(_sid, cheat_alert)
                     except Exception:
                         pass
     except Exception as _e:
