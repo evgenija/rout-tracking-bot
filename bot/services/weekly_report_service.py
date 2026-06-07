@@ -43,6 +43,7 @@ def format_weekly_report(
     grand_odo      = 0.0
     grand_cost     = 0.0
     grand_has_cost = False
+    has_asterisk   = False
 
     for s in p1_stats:
         driver_id   = s["telegram_id"]
@@ -77,7 +78,11 @@ def format_weekly_report(
                 has_cost = True
 
             label = d.strftime("%d.%m")
-            km_col  = f"{p2_day['km']:.1f}" if p2_day else f"{tracking:.1f}*"
+            if p2_day:
+                km_col = f"{p2_day['km']:.1f}"
+            else:
+                km_col = f"{tracking:.1f}*"
+                has_asterisk = True
             odo_col = f"{odo:.1f}" if odo is not None else "—"
             cost_col = f"{p2_day['cost']:,.0f} грн".replace(",", " ") if p2_day else "—"
             lines.append(f"{label} | odo {odo_col} | gps {tracking:.1f} | final {km_col} | {cost_col}")
@@ -110,6 +115,9 @@ def format_weekly_report(
         f"Оплата: {grand_cost_str}"
     )
 
-    note = "\n* — final_km = GPS (одометр відсутній або P2 не відповів)"
+    note = (
+        "\n* — final_km = GPS (одометр відсутній або P2 не відповів)"
+        if has_asterisk else ""
+    )
 
     return "\n\n".join([header] + driver_blocks + [grand_block]) + note
