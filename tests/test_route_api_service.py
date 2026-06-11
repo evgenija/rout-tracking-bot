@@ -8,7 +8,7 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from bot.utils.geo import haversine
+from bot.utils.geo import haversine, get_road_distances_per_leg
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -83,8 +83,10 @@ def test_get_route_json_structure():
         _make_cursor(fetchall=wp_rows),
     )
     with patch("aiosqlite.connect", return_value=db):
-        from bot.services import route_api_service
-        result = asyncio.run(route_api_service.get_route_json(42))
+        with patch("bot.services.route_api_service.get_road_distances_per_leg",
+                   new=AsyncMock(return_value=[469.0])):
+            from bot.services import route_api_service
+            result = asyncio.run(route_api_service.get_route_json(42))
 
     assert result is not None
 
@@ -124,12 +126,49 @@ def test_get_route_json_null_polyline():
         _make_cursor(fetchall=[]),
     )
     with patch("aiosqlite.connect", return_value=db):
-        from bot.services import route_api_service
-        result = asyncio.run(route_api_service.get_route_json(7))
+        with patch("bot.services.route_api_service.get_road_distances_per_leg",
+                   new=AsyncMock(return_value=[])):
+            from bot.services import route_api_service
+            result = asyncio.run(route_api_service.get_route_json(7))
 
     assert result is not None
     assert result["route_polyline"] is None
     assert result["waypoints"] == []
+
+
+# ── get_road_distances_per_leg ────────────────────────────────────────────────
+
+def test_get_road_distances_per_leg_empty():
+    """Менше 2 точок → порожній список."""
+    result = asyncio.run(get_road_distances_per_leg([]))
+    assert result == []
+    result1 = asyncio.run(get_road_distances_per_leg([{"lat": 50.0, "lon": 30.0, "is_suspicious": False}]))
+    assert result1 == []
+
+
+def test_get_road_distances_per_leg_fallback_to_haversine():
+    """Без API key → haversine fallback; повертає N-1 значень > 0."""
+    wps = [
+        {"lat": 50.4501, "lon": 30.5234, "is_suspicious": False, "timestamp": "2026-04-23T08:00:00"},
+        {"lat": 49.8397, "lon": 24.0297, "is_suspicious": False, "timestamp": "2026-04-23T17:00:00"},
+    ]
+    with patch("bot.config.GOOGLE_MAPS_API_KEY", ""):
+        result = asyncio.run(get_road_distances_per_leg(wps))
+    assert len(result) == 1
+    assert result[0] > 0
+
+
+def test_get_road_distances_per_leg_suspicious_count():
+    """N waypoints → N-1 значень незалежно від підозрілих точок."""
+    wps = [
+        {"lat": 50.4501, "lon": 30.5234, "is_suspicious": False},
+        {"lat": 99.0,    "lon": 99.0,    "is_suspicious": True},
+        {"lat": 49.8397, "lon": 24.0297, "is_suspicious": False},
+    ]
+    with patch("bot.config.GOOGLE_MAPS_API_KEY", ""):
+        result = asyncio.run(get_road_distances_per_leg(wps))
+    assert len(result) == 2
+    assert all(d > 0 for d in result)
 
 
 # ── get_cached_polyline ───────────────────────────────────────────────────────

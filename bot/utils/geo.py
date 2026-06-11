@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 _route_distance_cache: dict = {}
 # Значення: overview_polyline.points (encoded polyline string або None)
 _polyline_cache: dict = {}
+# Значення: список відстаней по відрізках (leg distances в км)
+_leg_distances_cache: dict = {}
 
 # Лічильник API-запитів (скидається при рестарті, для логування)
 _api_call_count: int = 0
@@ -154,6 +156,9 @@ async def get_road_distance_for_route(waypoints: List[Dict]) -> float:
                 )
             _route_distance_cache[cache_key] = total_km
             _polyline_cache[cache_key] = route0.get("overview_polyline", {}).get("points")
+            _leg_distances_cache[cache_key] = [
+                leg["distance"]["value"] / 1000 for leg in route0["legs"]
+            ]
             logger.info(
                 "Google Directions API запит #%d: %d точок → %.2f км (дорогами)",
                 _api_call_count, len(valid), total_km,
@@ -174,6 +179,47 @@ async def get_road_distance_for_route(waypoints: List[Dict]) -> float:
 def get_api_call_count() -> int:
     """Поточний лічильник API-запитів (з моменту запуску бота)."""
     return _api_call_count
+
+
+async def get_road_distances_per_leg(waypoints: List[Dict]) -> List[float]:
+    """Дорожня відстань для кожного відрізку (N waypoints → N-1 значень).
+
+    Робить один Google Directions API запит для валідних точок.
+    Для пар де одна або обидві точки підозрілі — haversine fallback.
+    """
+    n = len(waypoints)
+    if n < 2:
+        return []
+
+    valid = [(i, wp) for i, wp in enumerate(waypoints) if not wp.get("is_suspicious")]
+
+    if len(valid) < 2:
+        return [
+            haversine(waypoints[i]["lat"], waypoints[i]["lon"],
+                      waypoints[i + 1]["lat"], waypoints[i + 1]["lon"])
+            for i in range(n - 1)
+        ]
+
+    valid_wps = [wp for _, wp in valid]
+    cache_key = _route_cache_key(valid_wps)
+
+    if cache_key not in _leg_distances_cache:
+        await get_road_distance_for_route(valid_wps)
+
+    road_legs = _leg_distances_cache.get(cache_key)
+
+    valid_indices = [i for i, _ in valid]
+    road_map: dict = {}
+    if road_legs and len(road_legs) == len(valid) - 1:
+        for pos in range(len(valid) - 1):
+            road_map[(valid_indices[pos], valid_indices[pos + 1])] = road_legs[pos]
+
+    return [
+        road_map.get((i, i + 1),
+                     haversine(waypoints[i]["lat"], waypoints[i]["lon"],
+                               waypoints[i + 1]["lat"], waypoints[i + 1]["lon"]))
+        for i in range(n - 1)
+    ]
 
 
 def get_cached_polyline(waypoints: List[Dict]) -> str | None:

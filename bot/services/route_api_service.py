@@ -2,7 +2,7 @@ import aiosqlite
 from datetime import datetime
 
 from bot.config import DB_PATH
-from bot.utils.geo import haversine
+from bot.utils.geo import get_road_distances_per_leg
 
 
 async def get_route_json(route_id: int) -> dict | None:
@@ -28,6 +28,13 @@ async def get_route_json(route_id: int) -> dict | None:
         ) as cur:
             rows = await cur.fetchall()
 
+    wps_for_geo = [
+        {"lat": w["lat"], "lon": w["lon"], "is_suspicious": bool(w["is_suspicious"]),
+         "timestamp": w["timestamp"]}
+        for w in rows
+    ]
+    road_dists = await get_road_distances_per_leg(wps_for_geo)
+
     waypoints = []
     for i, w in enumerate(rows):
         wp = {
@@ -42,7 +49,7 @@ async def get_route_json(route_id: int) -> dict | None:
         }
         if i > 0:
             prev = rows[i - 1]
-            dist = haversine(prev["lat"], prev["lon"], w["lat"], w["lon"])
+            dist = road_dists[i - 1]
             try:
                 t1 = datetime.fromisoformat(prev["timestamp"])
                 t2 = datetime.fromisoformat(w["timestamp"])
