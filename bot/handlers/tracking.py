@@ -514,6 +514,15 @@ async def handle_finish_odometer(message: Message, state: FSMContext, pg_pool=No
 
     await message.answer(summary, reply_markup=kb_admin_driver_idle() if is_adm else kb_driver_idle())
 
+    if VIEWER_BASE_URL:
+        _driver_map_kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🗺 Карта", url=f"{VIEWER_BASE_URL}/route/{route_id}")
+        ]])
+        try:
+            await message.answer(f"🗺 Маршрут #{route_id}", reply_markup=_driver_map_kb)
+        except Exception as _e:
+            logger.warning("Не вдалося надіслати карту водію: %s", _e)
+
     admin_msg = admin_summary
     if should_alert:
         admin_msg += f"\n\n⚠️ Велика розбіжність по маршруту {user_name} — перевір!"
