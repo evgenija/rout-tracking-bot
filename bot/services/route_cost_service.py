@@ -13,7 +13,7 @@ from config_p2 import SUPER_ADMIN_IDS
 
 logger = logging.getLogger(__name__)
 
-LOGISTICS_DRIVER_IDS = {935741313, 1713367110, 570793350, 486855930}  # Бодя, ZAZA, Уколов, Жека
+LOGISTICS_DRIVER_IDS = {935741313, 1713367110, 570793350, 486855930, 432931183}  # Бодя, ZAZA, Уколов, Жека, Sheva
 
 
 def get_driver_type(telegram_id: int) -> str:
