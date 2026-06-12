@@ -196,6 +196,7 @@ if message.from_user.id not in SUPER_ADMIN_IDS:
 ## Доступ до БД
 
 **P1 SQLite** (`bot.db`) — файл на `worker-volume` Railway. Локальний `bot.db` **завжди порожній** — не читати локально, не аналізувати. Доступ тільки через `railway ssh`.
+Шлях на Railway: **`/data/bot.db`**. `/app/bot.db` — не існує, завжди порожній.
 
 **P2 PostgreSQL** — `postgres-volume` на Railway.
 - `PG_DATABASE_URL` (`postgres.railway.internal`) — тільки з Railway мережі, локально не працює.
@@ -284,10 +285,31 @@ GROUP BY route_id HAVING COUNT(*) > 1;
 | Функція | Файл | Призначення |
 |---|---|---|
 | `haversine(lat1, lon1, lat2, lon2)` | `bot/utils/geo.py` | Відстань між GPS-точками (км). Імпортувати звідси, не писати нову. |
+| `get_road_distance_for_route(waypoints)` | `bot/utils/geo.py` | Дорожня відстань маршруту через Google Directions API (1 call). Fallback: haversine × 1.4. Заповнює кеш відстані, polyline і per-leg. |
+| `get_road_distances_per_leg(waypoints)` | `bot/utils/geo.py` | Дорожня відстань для кожного відрізку (N waypoints → N-1 значень). 1 API call, кеш спільний з `get_road_distance_for_route`. Haversine fallback для підозрілих точок. |
+| `get_cached_polyline(waypoints)` | `bot/utils/geo.py` | Overview polyline з кешу (після виклику `get_road_distance_for_route`). |
 | `is_spike(lat_a, lon_a, lat_b, lon_b, lat_c, lon_c, time_a=None, time_b=None)` | `bot/utils/geo.py` | GPS spike detector. З timestamps: швидкість A→B ≤ 130 км/год → не spike (реальна точка). Без timestamps → тільки геометрична перевірка (backward compatible). Поріг: `_SPIKE_SPEED_THRESHOLD_KMH = 130.0`. |
 | `get_last_waypoint(route_id)` | `bot/models/database.py` | Остання геомітка маршруту |
 | `get_route_waypoints(route_id)` | `bot/models/database.py` | Всі геомітки маршруту |
 | `get_last_route_by_odometer(odometer_start, threshold=50.0)` | `bot/models/database.py` | Пошук попереднього маршруту по одометру (±50 км, будь-який водій) — ідентифікація машини при зміні водія |
+
+---
+
+## Ручне закриття маршруту (bypass finish-flow)
+
+> ⚠️ При закритті маршруту через скрипт (не через бот), нормальний finish-flow не викликається. Наслідки:
+
+- `route_polyline` залишається **NULL** → viewer показує сіру пунктирну лінію замість реального маршруту
+- `total_km` треба рахувати через `get_road_distance_for_route()` — **не** через `haversine × 1.4`
+  - `haversine × 1.4` — груба оцінка (коефіцієнт середній по Україні). Для трасових маршрутів завищує на 10–20%
+  - Google Directions API дає точну дорожню відстань через реальні GPS-точки
+- Після скрипту завжди запускати окремий скрипт для заповнення `route_polyline`:
+  ```python
+  total_km = await get_road_distance_for_route(waypoints)  # → заповнює кеш
+  polyline  = get_cached_polyline(waypoints)               # → читає з кешу
+  await update_route_polyline(route_id, polyline)
+  ```
+- Інцидент 11.06.2026: маршрут #241 (Sheva) закрито скриптом → polyline NULL, km 277.6 (haversine) замість 251.64 (Google API)
 
 ---
 
