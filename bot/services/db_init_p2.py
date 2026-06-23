@@ -94,6 +94,8 @@ async def create_p2_tables(pool):
             ("logistics_city_threshold_km",  386.0,    "Поріг місто/область для логістики (км)"),
             ("logistics_odometer_over_tracking_threshold", 0.095,
              "Поріг одометр > трекінг для логістики (9.5%)"),
+            ("logistics_odometer_inflated_buffer", 0.099,
+             "Буфер km при завищеному одометрі логістики: tracking × (1 + 0.099)"),
         ]:
             await conn.execute(
                 "INSERT INTO coefficients (key, value, description) VALUES ($1, $2, $3) "

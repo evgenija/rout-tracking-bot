@@ -237,7 +237,8 @@ def select_final_km(
     if abs(diff_pct) <= over_tracking:
         return odometer_km, 'within_tolerance'
     if diff_pct > over_tracking:
-        return tracking_km, 'odometer_inflated'
+        buffer = coefficients.get('odometer_inflated_buffer', 0.0)
+        return round(tracking_km * (1 + buffer), 2), 'odometer_inflated'
     if diff_pct <= -over_odometer:
         return odometer_km, 'gps_noise'
 

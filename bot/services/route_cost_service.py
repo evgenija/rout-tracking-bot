@@ -44,6 +44,9 @@ async def on_route_finished(
         _coeff["odometer_over_tracking_threshold"] = _coeff.get(
             "logistics_odometer_over_tracking_threshold", 0.095
         )
+        _coeff["odometer_inflated_buffer"] = _coeff.get(
+            "logistics_odometer_inflated_buffer", 0.099
+        )
     final_km, reason = select_final_km(tracking_km, odometer_km, _coeff)
 
     if reason == 'odometer_missing':

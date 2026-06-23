@@ -201,6 +201,11 @@ LOGISTICS_COEFFICIENTS = {
     "odometer_over_tracking_threshold": 0.095,  # logistics: 9.5%
 }
 
+LOGISTICS_COEFFICIENTS_WITH_BUFFER = {
+    **LOGISTICS_COEFFICIENTS,
+    "odometer_inflated_buffer": 0.099,  # logistics: +9.9% при завищеному одометрі
+}
+
 
 def test_select_final_km_logistics_within_9pct():
     # odo > tracking на 9% < 9.5% → одометр
@@ -228,6 +233,20 @@ def test_select_final_km_logistics_inflated_above_threshold():
     km, reason = select_final_km(100.0, 110.0, LOGISTICS_COEFFICIENTS)
     assert reason == "odometer_inflated"
     assert km == 100.0
+
+
+def test_select_final_km_logistics_inflated_with_buffer():
+    # odo > tracking на 10% > 9.5% + buffer 9.9% → tracking × 1.099
+    km, reason = select_final_km(100.0, 110.0, LOGISTICS_COEFFICIENTS_WITH_BUFFER)
+    assert reason == "odometer_inflated"
+    assert abs(km - 109.9) < 0.01  # 100 * 1.099
+
+
+def test_select_final_km_logistics_inflated_with_buffer_15pct():
+    # Детальний приклад з розрахунку: tracking=300, odo=345 (15%)
+    km, reason = select_final_km(300.0, 345.0, LOGISTICS_COEFFICIENTS_WITH_BUFFER)
+    assert reason == "odometer_inflated"
+    assert abs(km - 329.7) < 0.01  # 300 * 1.099
 
 
 def test_select_final_km_logistics_tracking_over_odo_small():
