@@ -487,6 +487,16 @@ async def handle_finish_odometer(message: Message, state: FSMContext, pg_pool=No
             )
     except Exception as _e:
         logger.warning("P2 route cost hook failed: %s", _e)
+        try:
+            import asyncio
+            from bot.utils.alerts import alert_super_admins
+            asyncio.create_task(alert_super_admins(
+                f"🚨 P2 PostgreSQL помилка — маршрут #{route_id}\n"
+                f"Помилка: {_e}\n"
+                f"Вартість маршруту не записана — потрібна ручна перевірка."
+            ))
+        except Exception:
+            pass
 
     odo_section_driver, should_alert = _format_odometer_accuracy(
         total_km, odometer_start, odometer_km, round_pct=True
