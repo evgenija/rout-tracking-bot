@@ -44,6 +44,7 @@ B64=$(base64 -i /tmp/chk_p1.py | tr -d '\n') && railway ssh sh -c "'echo $B64 | 
 - `Restart` не завжди допомагає при `catatonit: failed to exec pid1` → потрібен **Redeploy** PostgreSQL
 - `railway login` не працює в Claude Code (non-interactive mode) → запускати в окремому **Terminal.app**
 - Після Redeploy PostgreSQL → Redeploy worker (він не перепідключається автоматично)
+- HTTP зі скриптів на Railway: `httpx` **не встановлено** у venv → використовувати `aiohttp`
 
 ---
 
@@ -213,6 +214,25 @@ if message.from_user.id not in SUPER_ADMIN_IDS:
 B64=$(base64 -i /path/to/script.py | tr -d '\n')
 railway ssh sh -c "'echo $B64 | base64 -d > /tmp/run.py && python3 /tmp/run.py'" 2>&1
 ```
+
+### asyncpg — DATE параметри
+`asyncpg` не приймає рядки для DATE-полів → завжди передавати `datetime.date`:
+```python
+from datetime import date
+# ✅ правильно
+await pg.fetch("SELECT ... WHERE date = $1", date(2026, 6, 16))
+# ❌ asyncpg.DataError
+await pg.fetch("SELECT ... WHERE date = $1", "2026-06-16")
+```
+
+### Патерн ретроактивного перерахунку `daily_input`
+```
+1. Скрипт DRY_RUN=True → показати diff → апрув Жені
+2. Запустити ДО зміни тарифів у БД (якщо тарифи теж міняються)
+3. DRY_RUN=False → записати
+4. Оновити тарифи/коефіцієнти в БД
+5. Перерахувати поточний день з новими значеннями → надіслати звіт
+```
 Скрипт писати локально в `scripts/_tmp_*.py`, передавати через base64.
 
 ### Шаблон перевірки coefficients (через railway ssh)
@@ -254,6 +274,34 @@ BOT_TOKEN у `.env` може бути застарілим — актуальн�
 3. Для логістики: `odo_diff = odometer_km - odometer_start`; якщо `p2.km ≈ tracking` (трекінг використовувався) — перевірити чи `(odo_diff - p2.km) / p2.km` потрапляє в нову сіру зону (старий_поріг < % ≤ новий_поріг)
 4. Якщо так — UPDATE daily_input + сповіщення супер-адміну
 
+## Тарифи логістики — поточні правила (з 23.06.2026)
+
+### Крок 1: вибір km (`select_final_km` → `route_cost_service.py`)
+```
+diff = (одометр - трекінг) / трекінг
+
+diff ≤ 9.5%  → km = одометр
+diff > 9.5%  → km = трекінг × 1.099   ← нова формула з 23.06.2026
+одометр NULL → km = трекінг
+```
+Коефіцієнти в БД: `logistics_odometer_over_tracking_threshold = 0.095`, `logistics_odometer_inflated_buffer = 0.099`.
+
+⚠️ Якщо трекінг у діапазоні 352–386 км і diff > 9.5%: після ×1.099 результат може перевищити поріг 386 → тариф стрибає з міського на обласний.
+
+### Крок 2: розрахунок вартості (`_calc_logistics_cost` → `calculator.py`)
+```
+поріг = 386 км  (logistics_city_threshold_km)
+
+km ≤ 386:  cost = km × 11.2 + 3000   (до 23.06: km × 11.9 + 3000)
+km > 386:  cost = km × 20.0           (до 23.06: km × 20.7)
+```
+
+### Ретроспектива 23.06.2026
+- Крок 1 (×1.099) застосований ретроактивно до тижня 16–22.06: 10/17 маршрутів, +6 431 грн
+- Крок 2 (нові тарифи) застосований з 23.06.2026
+
+---
+
 ## Таблиці P2
 - `period_input` — виручка + sales_km; підтримує діапазони (date_from, date_to)
 - `daily_input` — дані доставки по водіях; заповнюється автоматично після кожного завершення маршруту в P1
@@ -285,9 +333,9 @@ GROUP BY route_id HAVING COUNT(*) > 1;
 | Функція | Файл | Призначення |
 |---|---|---|
 | `haversine(lat1, lon1, lat2, lon2)` | `bot/utils/geo.py` | Відстань між GPS-точками (км). Імпортувати звідси, не писати нову. |
-| `get_road_distance_for_route(waypoints)` | `bot/utils/geo.py` | Дорожня відстань маршруту через Google Directions API (1 call). Fallback: haversine × 1.4. Заповнює кеш відстані, polyline і per-leg. |
-| `get_road_distances_per_leg(waypoints)` | `bot/utils/geo.py` | Дорожня відстань для кожного відрізку (N waypoints → N-1 значень). 1 API call, кеш спільний з `get_road_distance_for_route`. Haversine fallback для підозрілих точок. |
-| `get_cached_polyline(waypoints)` | `bot/utils/geo.py` | Overview polyline з кешу (після виклику `get_road_distance_for_route`). |
+| `get_road_distance_for_route(waypoints)` | `bot/utils/geo.py` | Дорожня відстань через Google Directions API. При ≤ 25 non-suspicious точок — 1 запит. При > 25 — chunks по 25 з overlap (кілька запитів, sum). Fallback: haversine × 1.4. |
+| `get_road_distances_per_leg(waypoints)` | `bot/utils/geo.py` | Дорожня відстань для кожного відрізку (N waypoints → N-1 значень). Кеш спільний з `get_road_distance_for_route`. Haversine fallback для підозрілих точок. |
+| `get_cached_polyline(waypoints)` | `bot/utils/geo.py` | Overview polyline з кешу. При > 25 точок — повертає **None** (chunks mode); viewer малює straight lines між маркерами. |
 | `is_spike(lat_a, lon_a, lat_b, lon_b, lat_c, lon_c, time_a=None, time_b=None)` | `bot/utils/geo.py` | GPS spike detector. З timestamps: швидкість A→B ≤ 130 км/год → не spike (реальна точка). Без timestamps → тільки геометрична перевірка (backward compatible). Поріг: `_SPIKE_SPEED_THRESHOLD_KMH = 130.0`. |
 | `get_last_waypoint(route_id)` | `bot/models/database.py` | Остання геомітка маршруту |
 | `get_route_waypoints(route_id)` | `bot/models/database.py` | Всі геомітки маршруту |
@@ -310,6 +358,26 @@ GROUP BY route_id HAVING COUNT(*) > 1;
   await update_route_polyline(route_id, polyline)
   ```
 - Інцидент 11.06.2026: маршрут #241 (Sheva) закрито скриптом → polyline NULL, km 277.6 (haversine) замість 251.64 (Google API)
+
+---
+
+## Polyline для маршрутів > 25 waypoints
+
+`get_cached_polyline` повертає **None** при > 25 non-suspicious точок (chunks mode — polyline не будується при кількох chunks).
+
+**Наслідок:** при фінішуванні маршруту з > 25 точок → `route_polyline` в БД залишається старим (збережений раніше при меншій кількості точок, без урахування нових зупинок).
+
+**Ознака проблеми у viewer:** маркер зупинки "відірваний" від лінії маршруту.
+
+**Виправлення (ssh скрипт, шаблон `scripts/_tmp_fix_polyline_304.py`):**
+```python
+# 1. Chunks по 25 точок → 2 Google API запити
+# 2. decode_polyline(pl1) + decode_polyline(pl2)[1:] → merge coords
+# 3. encode_polyline(merged) → UPDATE routes SET route_polyline
+```
+Функції `decode_polyline` / `encode_polyline` / `merge_polylines` — написати inline в скрипті (немає залежностей).
+
+**Інцидент 10.07.2026:** маршрути #304, #305, #310 — Білоголовка дом (50 км детур) пропускалась sampling-алгоритмом; виправлено ретроактивно: +72.9 km для #304, +975 грн сумарно по P2.
 
 ---
 
