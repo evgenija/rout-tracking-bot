@@ -69,12 +69,10 @@ async def get_road_distance_for_route(waypoints: List[Dict]) -> float:
 
     Переваги перед haversine:
     - Враховує реальні дороги (у 1.3-2x точніше для міської логістики)
-    - 1 API-запит на весь маршрут (не на кожну пару точок)
 
     Вартість:
     - Google Directions API Advanced: $0.010 за запит (>10 зупинок)
-    - 5 водіїв × 1 запит/маршрут × 30 днів = 150 запитів/місяць ≈ $1.50/місяць
-    - Значно дешевше за Distance Matrix ($11/місяць при 75 парах/день)
+    - При > 25 точок маршрут ділиться на chunks по 25 з overlap — кілька запитів.
 
     Підозрілі точки (is_suspicious=True) виключаються з маршруту.
 
@@ -85,95 +83,114 @@ async def get_road_distance_for_route(waypoints: List[Dict]) -> float:
 
     from bot.config import GOOGLE_MAPS_API_KEY
 
-    # Фільтруємо підозрілі GPS-точки
     valid = [wp for wp in waypoints if not wp.get("is_suspicious")]
     if len(valid) < 2:
         return 0.0
 
-    # Кеш
     cache_key = _route_cache_key(valid)
     if cache_key in _route_distance_cache:
         logger.debug("Google Directions: cache hit (%d точок)", len(valid))
         return _route_distance_cache[cache_key]
 
-    # Немає API key — fallback
     if not GOOGLE_MAPS_API_KEY:
-        logger.warning(
-            "GOOGLE_MAPS_API_KEY не задано — fallback haversine×1.4 (%.2f км)",
-            calculate_route_distance(valid) * 1.4,
-        )
-        return round(calculate_route_distance(valid) * 1.4, 2)
+        fallback = round(calculate_route_distance(valid) * 1.4, 2)
+        logger.warning("GOOGLE_MAPS_API_KEY не задано — fallback haversine×1.4 (%.2f км)", fallback)
+        return fallback
 
-    # Google Directions API обмеження: максимум 25 проміжних зупинок
-    # При більшій кількості — рівномірна вибірка
-    if len(valid) > 25:
-        logger.warning(
-            "Маршрут має %d точок > 25 (ліміт Directions API) — рівномірна вибірка",
-            len(valid),
-        )
-        step = (len(valid) - 1) / 24
-        indices = {0, len(valid) - 1} | {int(round(i * step)) for i in range(1, 24)}
-        valid = [valid[i] for i in sorted(indices)]
+    # Chunks по 25 точок з overlap (остання точка chunk N = перша chunk N+1).
+    # Це гарантує що всі waypoints враховуються — без рівномірної вибірки.
+    CHUNK_SIZE = 25
+    chunks: list = []
+    i = 0
+    while i < len(valid):
+        end = min(i + CHUNK_SIZE, len(valid))
+        chunks.append(valid[i:end])
+        if end == len(valid):
+            break
+        i = end - 1  # overlap: остання точка поточного = перша наступного
 
-    origin      = f"{round(valid[0]['lat'], 6)},{round(valid[0]['lon'], 6)}"
-    destination = f"{round(valid[-1]['lat'], 6)},{round(valid[-1]['lon'], 6)}"
-
-    params: dict = {
-        "origin":      origin,
-        "destination": destination,
-        "mode":        "driving",
-        "key":         GOOGLE_MAPS_API_KEY,
-    }
-    if len(valid) > 2:
-        params["waypoints"] = "|".join(
-            f"{round(wp['lat'], 6)},{round(wp['lon'], 6)}"
-            for wp in valid[1:-1]
-        )
+    total_km = 0.0
+    all_leg_km: list = []
+    first_polyline: Optional[str] = None
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(
-                "https://maps.googleapis.com/maps/api/directions/json",
-                params=params,
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                data = await resp.json()
+            for chunk_idx, chunk in enumerate(chunks):
+                origin      = f"{round(chunk[0]['lat'], 6)},{round(chunk[0]['lon'], 6)}"
+                destination = f"{round(chunk[-1]['lat'], 6)},{round(chunk[-1]['lon'], 6)}"
+                params: dict = {
+                    "origin":      origin,
+                    "destination": destination,
+                    "mode":        "driving",
+                    "key":         GOOGLE_MAPS_API_KEY,
+                }
+                if len(chunk) > 2:
+                    params["waypoints"] = "|".join(
+                        f"{round(wp['lat'], 6)},{round(wp['lon'], 6)}"
+                        for wp in chunk[1:-1]
+                    )
 
-        _api_call_count += 1
-        status = data.get("status")
+                async with session.get(
+                    "https://maps.googleapis.com/maps/api/directions/json",
+                    params=params,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    data = await resp.json()
 
-        if status == "OK":
-            route0 = data["routes"][0]
-            total_meters = sum(
-                leg["distance"]["value"]
-                for leg in route0["legs"]
-            )
-            total_km = round(total_meters / 1000, 2)
-            if total_km > 1000:
-                logger.warning(
-                    "Google Directions API: підозріло великий результат %.2f км (%d точок) — перевір дані",
-                    total_km, len(valid),
+                _api_call_count += 1
+                status = data.get("status")
+
+                if status != "OK":
+                    logger.warning(
+                        "Google Directions API статус: %s (chunk %d/%d) — fallback",
+                        status, chunk_idx + 1, len(chunks),
+                    )
+                    if status in ("REQUEST_DENIED", "OVER_DAILY_LIMIT", "OVER_QUERY_LIMIT"):
+                        try:
+                            import asyncio as _asyncio
+                            from bot.utils.alerts import alert_super_admins
+                            _asyncio.create_task(alert_super_admins(
+                                f"🚨 Google Directions API: {status}\n"
+                                f"Маршрути рахуються по haversine×1.4.\n"
+                                f"Перевір білінг: console.cloud.google.com"
+                            ))
+                        except Exception:
+                            pass
+                    raise RuntimeError(f"API status {status}")
+
+                route0 = data["routes"][0]
+                chunk_km = sum(leg["distance"]["value"] for leg in route0["legs"]) / 1000
+                total_km += chunk_km
+                all_leg_km.extend(leg["distance"]["value"] / 1000 for leg in route0["legs"])
+
+                if chunk_idx == 0:
+                    first_polyline = route0.get("overview_polyline", {}).get("points")
+
+                logger.info(
+                    "Google Directions API запит #%d (chunk %d/%d): %d точок → %.2f км",
+                    _api_call_count, chunk_idx + 1, len(chunks), len(chunk), chunk_km,
                 )
-            _route_distance_cache[cache_key] = total_km
-            _polyline_cache[cache_key] = route0.get("overview_polyline", {}).get("points")
-            _leg_distances_cache[cache_key] = [
-                leg["distance"]["value"] / 1000 for leg in route0["legs"]
-            ]
-            logger.info(
-                "Google Directions API запит #%d: %d точок → %.2f км (дорогами)",
-                _api_call_count, len(valid), total_km,
-            )
-            return total_km
-
-        logger.warning("Google Directions API статус: %s — fallback haversine×1.4", status)
 
     except Exception as exc:
         logger.warning("Google Directions API помилка: %s — fallback haversine×1.4", exc)
+        fallback = round(calculate_route_distance(valid) * 1.4, 2)
+        logger.warning("Fallback haversine×1.4: %.2f км", fallback)
+        return fallback
 
-    # Fallback
-    fallback = round(calculate_route_distance(valid) * 1.4, 2)
-    logger.warning("Fallback haversine×1.4: %.2f км", fallback)
-    return fallback
+    total_km = round(total_km, 2)
+    if total_km > 1000:
+        logger.warning(
+            "Google Directions API: підозріло великий результат %.2f км (%d точок) — перевір дані",
+            total_km, len(valid),
+        )
+
+    _route_distance_cache[cache_key] = total_km
+    _leg_distances_cache[cache_key] = all_leg_km
+    # polyline зберігається тільки при одному chunk (≤ 25 точок, повний маршрут в 1 запиті).
+    # При chunks > 1 — None; viewer малює straight lines між маркерами.
+    _polyline_cache[cache_key] = first_polyline if len(chunks) == 1 else None
+
+    return total_km
 
 
 def get_api_call_count() -> int:
