@@ -55,6 +55,67 @@ def calculate_route_distance(waypoints: List[Dict]) -> float:
 
 # ── Google Directions API ─────────────────────────────────────────────────────
 
+def _decode_polyline(encoded: str) -> list:
+    """Декодує Google Encoded Polyline → список (lat, lon)."""
+    result = []
+    index = lat = lng = 0
+    while index < len(encoded):
+        for coord_idx in range(2):
+            b, shift, val = 0, 0, 0
+            while True:
+                b = ord(encoded[index]) - 63
+                index += 1
+                val |= (b & 0x1f) << shift
+                shift += 5
+                if b < 0x20:
+                    break
+            if val & 1:
+                val = ~val
+            val >>= 1
+            if coord_idx == 0:
+                lat += val
+            else:
+                lng += val
+        result.append((lat / 1e5, lng / 1e5))
+    return result
+
+
+def _encode_polyline(coords: list) -> str:
+    """Кодує список (lat, lon) → Google Encoded Polyline."""
+    result = []
+    prev_lat = prev_lng = 0
+    for lat, lng in coords:
+        lat_e5 = round(lat * 1e5)
+        lng_e5 = round(lng * 1e5)
+        for val in [lat_e5 - prev_lat, lng_e5 - prev_lng]:
+            val = ~(val << 1) if val < 0 else val << 1
+            while val >= 0x20:
+                result.append(chr((0x20 | (val & 0x1f)) + 63))
+                val >>= 5
+            result.append(chr(val + 63))
+        prev_lat, prev_lng = lat_e5, lng_e5
+    return "".join(result)
+
+
+def _merge_polylines(polylines: list) -> Optional[str]:
+    """Об'єднує список encoded polylines в один.
+
+    Перша точка кожного наступного chunk = остання попереднього (overlap) — пропускається.
+    Повертає None якщо будь-який chunk не має polyline.
+    """
+    if not polylines or any(pl is None for pl in polylines):
+        return None
+    if len(polylines) == 1:
+        return polylines[0]
+    all_coords: list = []
+    for i, pl in enumerate(polylines):
+        coords = _decode_polyline(pl)
+        if i > 0:
+            coords = coords[1:]  # перша точка = остання попереднього chunk (overlap)
+        all_coords.extend(coords)
+    return _encode_polyline(all_coords)
+
+
 def _route_cache_key(waypoints: List[Dict]) -> str:
     """MD5-ключ кешу за округленими координатами маршруту (4 знаки ≈ 11 м точність)."""
     coords = tuple(
@@ -111,7 +172,7 @@ async def get_road_distance_for_route(waypoints: List[Dict]) -> float:
 
     total_km = 0.0
     all_leg_km: list = []
-    first_polyline: Optional[str] = None
+    chunk_polylines: list = []
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -162,9 +223,7 @@ async def get_road_distance_for_route(waypoints: List[Dict]) -> float:
                 chunk_km = sum(leg["distance"]["value"] for leg in route0["legs"]) / 1000
                 total_km += chunk_km
                 all_leg_km.extend(leg["distance"]["value"] / 1000 for leg in route0["legs"])
-
-                if chunk_idx == 0:
-                    first_polyline = route0.get("overview_polyline", {}).get("points")
+                chunk_polylines.append(route0.get("overview_polyline", {}).get("points"))
 
                 logger.info(
                     "Google Directions API запит #%d (chunk %d/%d): %d точок → %.2f км",
@@ -186,9 +245,7 @@ async def get_road_distance_for_route(waypoints: List[Dict]) -> float:
 
     _route_distance_cache[cache_key] = total_km
     _leg_distances_cache[cache_key] = all_leg_km
-    # polyline зберігається тільки при одному chunk (≤ 25 точок, повний маршрут в 1 запиті).
-    # При chunks > 1 — None; viewer малює straight lines між маркерами.
-    _polyline_cache[cache_key] = first_polyline if len(chunks) == 1 else None
+    _polyline_cache[cache_key] = _merge_polylines(chunk_polylines)
 
     return total_km
 

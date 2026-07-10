@@ -335,7 +335,7 @@ GROUP BY route_id HAVING COUNT(*) > 1;
 | `haversine(lat1, lon1, lat2, lon2)` | `bot/utils/geo.py` | Відстань між GPS-точками (км). Імпортувати звідси, не писати нову. |
 | `get_road_distance_for_route(waypoints)` | `bot/utils/geo.py` | Дорожня відстань через Google Directions API. При ≤ 25 non-suspicious точок — 1 запит. При > 25 — chunks по 25 з overlap (кілька запитів, sum). Fallback: haversine × 1.4. |
 | `get_road_distances_per_leg(waypoints)` | `bot/utils/geo.py` | Дорожня відстань для кожного відрізку (N waypoints → N-1 значень). Кеш спільний з `get_road_distance_for_route`. Haversine fallback для підозрілих точок. |
-| `get_cached_polyline(waypoints)` | `bot/utils/geo.py` | Overview polyline з кешу. При > 25 точок — повертає **None** (chunks mode); viewer малює straight lines між маркерами. |
+| `get_cached_polyline(waypoints)` | `bot/utils/geo.py` | Overview polyline з кешу. При > 25 точок — повертає merged polyline (chunks об'єднані через `_merge_polylines`). |
 | `is_spike(lat_a, lon_a, lat_b, lon_b, lat_c, lon_c, time_a=None, time_b=None)` | `bot/utils/geo.py` | GPS spike detector. З timestamps: швидкість A→B ≤ 130 км/год → не spike (реальна точка). Без timestamps → тільки геометрична перевірка (backward compatible). Поріг: `_SPIKE_SPEED_THRESHOLD_KMH = 130.0`. |
 | `get_last_waypoint(route_id)` | `bot/models/database.py` | Остання геомітка маршруту |
 | `get_route_waypoints(route_id)` | `bot/models/database.py` | Всі геомітки маршруту |
@@ -363,19 +363,13 @@ GROUP BY route_id HAVING COUNT(*) > 1;
 
 ## Polyline для маршрутів > 25 waypoints
 
-`get_cached_polyline` повертає **None** при > 25 non-suspicious точок (chunks mode — polyline не будується при кількох chunks).
+`get_cached_polyline` повертає **merged polyline** при > 25 non-suspicious точок: polylines всіх chunks об'єднуються через `_decode_polyline` → skip overlap → `_encode_polyline`.
 
-**Наслідок:** при фінішуванні маршруту з > 25 точок → `route_polyline` в БД залишається старим (збережений раніше при меншій кількості точок, без урахування нових зупинок).
+Функції `_decode_polyline` / `_encode_polyline` / `_merge_polylines` — в `bot/utils/geo.py` (приватні, з `_` префіксом).
 
-**Ознака проблеми у viewer:** маркер зупинки "відірваний" від лінії маршруту.
+**Ознака проблеми у viewer (якщо polyline старий або NULL):** маркер зупинки "відірваний" від лінії маршруту. Виправити через ssh скрипт (шаблон `scripts/_tmp_fix_polyline_304.py`).
 
-**Виправлення (ssh скрипт, шаблон `scripts/_tmp_fix_polyline_304.py`):**
-```python
-# 1. Chunks по 25 точок → 2 Google API запити
-# 2. decode_polyline(pl1) + decode_polyline(pl2)[1:] → merge coords
-# 3. encode_polyline(merged) → UPDATE routes SET route_polyline
-```
-Функції `decode_polyline` / `encode_polyline` / `merge_polylines` — написати inline в скрипті (немає залежностей).
+**Інцидент 10.07.2026:** маршрути #304, #305, #310 — Білоголовка дом (50 км детур) пропускалась sampling-алгоритмом; виправлено ретроактивно: +72.9 km для #304, +975 грн сумарно по P2.
 
 **Інцидент 10.07.2026:** маршрути #304, #305, #310 — Білоголовка дом (50 км детур) пропускалась sampling-алгоритмом; виправлено ретроактивно: +72.9 km для #304, +975 грн сумарно по P2.
 
