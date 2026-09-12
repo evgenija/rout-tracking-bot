@@ -117,11 +117,11 @@ async def get_user(telegram_id: int) -> Optional[Dict]:
             return dict(row) if row else None
 
 
-async def create_user(telegram_id: int, username: str, full_name: str, role: str = "driver"):
+async def create_user(telegram_id: int, username: str, full_name: str, role: str = "driver", driver_type: str = "logistics"):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT OR IGNORE INTO users (telegram_id, username, full_name, role) VALUES (?, ?, ?, ?)",
-            (telegram_id, username, full_name, role),
+            "INSERT OR IGNORE INTO users (telegram_id, username, full_name, role, driver_type) VALUES (?, ?, ?, ?, ?)",
+            (telegram_id, username, full_name, role, driver_type),
         )
         await db.commit()
 

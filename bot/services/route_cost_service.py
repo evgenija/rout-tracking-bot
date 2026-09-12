@@ -13,11 +13,11 @@ from config_p2 import SUPER_ADMIN_IDS
 
 logger = logging.getLogger(__name__)
 
-LOGISTICS_DRIVER_IDS = {935741313, 1713367110, 570793350, 486855930, 432931183}  # Бодя, ZAZA, Уколов, Жека, Sheva
+OWN_DRIVER_IDS = {5865598299, 568294118, 496946423}  # Трохимчук, Тарас, Юрій — решта водіїв за замовчуванням логістика
 
 
 def get_driver_type(telegram_id: int) -> str:
-    return "logistics" if telegram_id in LOGISTICS_DRIVER_IDS else "own"
+    return "own" if telegram_id in OWN_DRIVER_IDS else "logistics"
 
 
 async def on_route_finished(
